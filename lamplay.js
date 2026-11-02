@@ -1,12 +1,14 @@
-/* LamPlay by WaterFAQ — 0.2.0 (experimental)
+/* LamPlay by WaterFAQ — 0.2.1 (experimental)
  * Independent Lampa plugin. Direct connections only; no proxy or remote code execution.
  * Providers: Kodik, HDrezka, AniLibria / AniLiberty.
  */
 (function (root) {
     'use strict';
-    var VERSION = '0.2.0';
+    var VERSION = '0.2.1';
     var KEY = 'lamplay';
     var NAME = 'LamPlay';
+    // L-shaped frame and play wedge; currentColor follows the host focus theme.
+    var LOGO = '<svg class="lamplay-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" aria-hidden="true"><path fill="currentColor" d="M4 4h6v20h18v4H4zM15 4l14 9-14 9z"/></svg>';
 
     function own(obj, key) { return Object.prototype.hasOwnProperty.call(obj, key); }
     function list(value) { return Array.isArray(value) ? value : []; }
@@ -341,14 +343,19 @@
 
     function parseRezkaSearch(html, base) {
         var dom = doc(cleanPage(html)), items = [], seen = {};
-        nodes(dom, '.b-content__inline_item').forEach(function (card) {
-            var link = card.querySelector('.b-content__inline_item-link a');
+        nodes(dom, '.b-content__inline_item-link, li').forEach(function (card) {
+            var link = card.querySelector('a[href]');
             var url = absolute(link && link.getAttribute('href'), base);
-            if (!url || origin(url) !== origin(base) || seen[url]) return;
+            if (!url) return;
+            var path = new root.URL(url);
+            if (!/^\/(films|series|animation|cartoons)\//.test(path.pathname)) return;
+            // Mirrors often emit canonical links: keep subsequent requests on the chosen mirror.
+            url = origin(base) + path.pathname + path.search;
+            if (seen[url]) return;
             seen[url] = true;
-            var info = text(card.querySelector('.b-content__inline_item-link div'));
+            var info = text(card.querySelector('div')) || text(link);
             var year = info.match(/\b(?:19|20)\d{2}\b/);
-            items.push({ id: url, url: url, title: text(link), year: year ? year[0] : '', description: info });
+            items.push({ id: url, url: url, title: text(card.querySelector('.enty')) || text(link), year: year ? year[0] : '', description: info });
         });
         return items;
     }
@@ -363,7 +370,7 @@
         var movie = html.match(/initCDNMoviesEvents\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
         var initial = series || movie, dom = doc(html);
         if (!initial) {
-            if (/loginForm|check-form/.test(html)) throw new Error('HDrezka требует входа. Откройте Настройки → LamPlay → HDrezka.');
+            // A login form is also present on ordinary anonymous pages.
             throw new Error('HDrezka: параметры плеера не найдены. Проверьте зеркало или выберите другой результат.');
         }
         var voices = nodes(dom, '#translators-list .b-translator__item').map(function (node) {
@@ -381,17 +388,29 @@
         this.id = 'rezka'; this.title = 'HDrezka';
         function base() { return hostSetting(settings('rezka_host', ''), 'https://rezka.ag'); }
         function options(page) {
-            if (session) return session.options(page);
+            if (session) {
+                var params = session.options(page);
+                params.withCredentials = session.confirmed(origin(page));
+                return params;
+            }
             if (root.Lampa && root.Lampa.Platform.is('android')) {
                 return { withCredentials: true, headers: { Referer: page, Origin: origin(page) } };
             }
-            return { withCredentials: true };
+            return { withCredentials: false };
         }
         this.search = function (query, movie, done, fail) {
-            var url = base() + '/?do=search&subaction=search&q=' + encodeURIComponent(query);
+            var url = base() + '/search/?do=search&subaction=search&q=' + encodeURIComponent(query);
+            function quickSearch() {
+                io.request(base() + '/engine/ajax/search.php', { q: query }, 'text', function (html) {
+                    try { done(rank(parseRezkaSearch(html, base()), movie)); } catch (e) { fail(e); }
+                }, fail, options(base() + '/'));
+            }
             io.request(url, null, 'text', function (html) {
-                try { done(rank(parseRezkaSearch(html, base()), movie)); } catch (e) { fail(e); }
-            }, fail, options(base() + '/'));
+                try {
+                    var items = rank(parseRezkaSearch(html, base()), movie);
+                    if (items.length) done(items); else quickSearch();
+                } catch (e) { fail(e); }
+            }, quickSearch, options(base() + '/'));
         };
         this.open = function (result, done, fail) {
             io.request(result.url, null, 'text', function (html) {
@@ -886,7 +905,7 @@
                 return { url: chooseQuality(streams.quality, setting('quality', '1080')), quality: streams.quality,
                     subtitles: streams.subtitles && streams.subtitles.length ? streams.subtitles : false,
                     title: episodeTitle(release.title, ep, voice.title, flag(setting('full_episode_title', true), true)),
-                    timeline: view, tv: movie, season: ep.season ? +ep.season : undefined, episode: ep.number !== '' ? +ep.number : undefined };
+                    timeline: view, card: movie, season: ep.season ? +ep.season : undefined, episode: ep.number !== '' ? +ep.number : undefined };
             }
             function play(ep, index, items) {
                 if (busy) return;
@@ -899,7 +918,7 @@
                     finish();
                     var playlist = items.map(function (item, i) {
                         if (i === index) return first;
-                        var cell = { title: episodeTitle(release.title, item, voice.title, flag(setting('full_episode_title', true), true)), timeline: timeline(item), tv: movie,
+                        var cell = { title: episodeTitle(release.title, item, voice.title, flag(setting('full_episode_title', true), true)), timeline: timeline(item), card: movie,
                             season: item.season ? +item.season : undefined, episode: item.number !== '' ? +item.number : undefined };
                         cell.url = function (callback) {
                             source.resolve(release, item, function (next) {
@@ -945,6 +964,8 @@
         }
 
         $('<style id="lamplay-style"></style>').text(
+            '.lamplay-logo{width:1.6em;height:1.6em;flex-shrink:0;fill:currentColor}' +
+            '.view--lamplay-direct{color:#fff}.view--lamplay-direct.focus{color:#111;background:#fff}' +
             '.lamplay{height:100%}.lamplay__panel{padding:1.4em 1.5em 3em}' +
             '.lamplay__title{font-size:1.5em;font-weight:600}.lamplay__subtitle{opacity:.65;margin:.5em 0 1em;overflow-wrap:break-word}' +
             '.lamplay__controls{display:flex;flex-wrap:wrap;margin-bottom:1em}' +
@@ -960,6 +981,10 @@
         function updateButton(binding) {
             var parent = binding.button.parent();
             if (!parent.length) return;
+            if (binding.direct && binding.direct.parent().length && flag(setting('button_first', true), true)) {
+                var directParent = binding.direct.parent();
+                if (directParent.children('.full-start__button').first()[0] !== binding.direct[0]) directParent.prepend(binding.direct);
+            }
             if (flag(setting('button_first', true), true)) {
                 var first = parent.children('.full-start__button, .selector').first();
                 if (first.length && first[0] !== binding.button[0]) first.before(binding.button);
@@ -970,11 +995,23 @@
         function updateButtons() {
             buttonBindings.forEach(updateButton);
         }
-        function bindButton(button, marker) {
+        function bindButton(button, marker, render) {
             var binding = { button: button, marker: marker };
+            // Modern Lampa groups source buttons in a hidden container. Keep that source
+            // and create a separate shortcut in the visible action row.
+            var actions = render.find('.full-start-new__buttons').first();
+            if (actions.length && actions[0] !== button.parent()[0]) {
+                binding.direct = actions.children('.view--lamplay-direct').first();
+                if (!binding.direct.length) {
+                    binding.direct = $('<div class="full-start__button selector view--lamplay-direct">' + LOGO + '<span>LamPlay</span></div>');
+                    binding.direct.on('hover:enter', function () { button.trigger('hover:enter'); });
+                    actions.prepend(binding.direct);
+                }
+            }
             if (root.MutationObserver && button.parent().length) {
                 binding.observer = new root.MutationObserver(function () { updateButton(binding); });
                 binding.observer.observe(button.parent()[0], { childList: true });
+                if (binding.direct) binding.observer.observe(actions[0], { childList: true });
             }
             buttonBindings.push(binding); updateButton(binding);
         }
@@ -993,26 +1030,26 @@
                         return this.nodeType === 8 && this.nodeValue === 'lamplay-original-button-position';
                     }).first();
                     if (!savedMarker.length) { savedMarker = $(root.document.createComment('lamplay-original-button-position')); existing.before(savedMarker); }
-                    bindButton(existing, savedMarker);
+                    bindButton(existing, savedMarker, render);
                 }
                 updateButtons(); return;
             }
-            var button = $('<div class="full-start__button selector view--lamplay"><span>LamPlay</span></div>');
+            var button = $('<div class="full-start__button selector view--lamplay">' + LOGO + '<span>LamPlay</span></div>');
             button.on('hover:enter', function () {
                 Lampa.Activity.push({ component: KEY, title: NAME, movie: event.data.movie, page: 1, url: '' });
             });
             var anchor = render.find('.view--torrent').first();
             var marker = $(root.document.createComment('lamplay-original-button-position'));
             if (anchor.length) anchor.after(marker);
-            else render.find('.full-start__buttons').first().append(marker);
+            else render.find('.buttons--container, .full-start__buttons, .full-start-new__buttons').first().append(marker);
             marker.after(button);
-            bindButton(button, marker);
+            bindButton(button, marker, render);
         });
         Lampa.SettingsApi.addComponent({ component: KEY, name: NAME,
-            icon: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>' });
+            icon: LOGO });
         var childMenus = [];
         function param(name, type, label, value, values, description, component, onChange) {
-            Lampa.SettingsApi.addParam({ component: component || KEY, param: { name: KEY + '_' + name, type: type, 'default': value, values: values },
+            Lampa.SettingsApi.addParam({ component: component || KEY, param: { name: KEY + '_' + name, type: type, 'default': value, values: values, placeholder: 'Не задано' },
                 field: { name: label, description: description || '' }, onChange: onChange });
         }
         function buttonParam(component, name, label, action, description, onRender) {
@@ -1023,8 +1060,13 @@
             childMenus.push(id);
             Lampa.SettingsApi.addComponent({ component: id, name: title,
                 icon: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M4 4h6l2 3h8v13H4z"/></svg>' });
+            var returnIndex = 0;
             buttonParam(KEY, id + '_open', title + ' ›', function () {
-                Lampa.Settings.create(id, { onBack: function () { Lampa.Settings.create(KEY); } });
+                Lampa.Settings.create(id, { onBack: function () { Lampa.Settings.create(KEY, { last_index: returnIndex }); } });
+            }, '', function (item) {
+                item.on('hover:enter', function () { returnIndex = item.parent().find('.selector').index(item); });
+                // The settings component may have no .settings ancestor in older builds.
+                item.on('hover:focus', function () { returnIndex = item.parent().find('.selector').index(item); });
             });
         }
         param('source', 'select', 'Источник по умолчанию', 'kodik', { kodik: 'Kodik', rezka: 'HDrezka', libria: 'AniLibria' });
@@ -1055,7 +1097,7 @@
         function passwordInput(callback) {
             var host = rezkaHost();
             Lampa.Input.edit({ title: 'Пароль HDrezka', value: passwordOrigin === host ? passwordDraft : '', free: true,
-                nosave: true, password: true }, function (value) {
+                nosave: true, password: false }, function (value) {
                 passwordDraft = String(value || ''); passwordOrigin = host; updateAuthStatus();
                 Lampa.Controller.toggle('settings_component');
                 if (callback && passwordDraft) callback();
