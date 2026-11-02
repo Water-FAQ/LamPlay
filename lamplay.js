@@ -1,10 +1,10 @@
-/* LamPlay by WaterFAQ — 0.2.1 (experimental)
+/* LamPlay by WaterFAQ — 0.3.0 (experimental)
  * Independent Lampa plugin. Direct connections only; no proxy or remote code execution.
  * Providers: Kodik, HDrezka, AniLibria / AniLiberty.
  */
 (function (root) {
     'use strict';
-    var VERSION = '0.2.1';
+    var VERSION = '0.3.0';
     var KEY = 'lamplay';
     var NAME = 'LamPlay';
     // L-shaped frame and play wedge; currentColor follows the host focus theme.
@@ -236,8 +236,9 @@
                     value.cookies = mergeCookies(value.cookies, headers, page);
                     store(host, value);
                 };
-            } else if (Lampa.Platform.is('android')) {
-                // Keep login and subsequent reads in the same browser cookie jar.
+            } else {
+                // Login, verification and reads must share the browser cookie jar,
+                // including webOS, where native requests may use a different service.
                 options.browserRequest = true;
             }
             return options;
@@ -250,8 +251,9 @@
         this.login = function (host, login, password, done, fail) {
             var self = this;
             io.request(host + '/ajax/login/', { login_name: login, login_password: password, login_not_save: 0 }, 'json', function (response) {
-                if (!(response && (response.success || /уже авторизован/i.test(response.message || '')))) {
-                    return fail(new Error('HDrezka не подтвердила вход. Проверьте логин и пароль.'));
+                if (!(response && (flag(response.success) || /уже авторизован/i.test(response.message || '')))) {
+                    var message = response && (response.message || response.error);
+                    return fail(new Error('HDrezka: ' + (message ? text(doc(String(message)).body).slice(0, 300) : 'сайт не подтвердил вход. Проверьте логин, пароль и зеркало.')));
                 }
                 io.request(host + '/', null, 'text', function (html) {
                     try { cleanPage(html); } catch (e) { return uncertain(e); }
@@ -330,7 +332,11 @@
                     }
                     value = type === 'text' ? String(value || '') : json(value);
                 }
-                catch (e) { return end(new Error('Источник вернул данные в неожиданном формате.')); }
+                catch (e) {
+                    try { cleanPage(String(value || '')); } catch (challenge) { return end(challenge); }
+                    return end(new Error(/^\s*</.test(String(value || '')) ?
+                        'Источник вернул HTML вместо данных. Проверьте зеркало и доступность сайта.' : 'Источник вернул данные в неожиданном формате.'));
+                }
                 end(null, value);
             }, function (xhr, reason) {
                 var status = xhr && xhr.status;
@@ -349,6 +355,7 @@
             if (!url) return;
             var path = new root.URL(url);
             if (!/^\/(films|series|animation|cartoons)\//.test(path.pathname)) return;
+            if (!/\/\d[^/]*\.html$/i.test(path.pathname)) return;
             // Mirrors often emit canonical links: keep subsequent requests on the chosen mirror.
             url = origin(base) + path.pathname + path.search;
             if (seen[url]) return;
@@ -561,7 +568,7 @@
                 return io.request(result.url, null, 'text', function (html) {
                     try {
                         var catalog = kodikCatalog(html, result.url, typeof result.translation === 'string' ? result.translation : 'Основной перевод');
-                        done({ id: result.id, title: result.title, voices: catalog.voices, widget: true, pages: {} });
+                        done({ id: result.id, title: result.title, voices: catalog.voices, series: /\/serial\//.test(result.url), widget: true, pages: {} });
                     } catch (e) { fail(e); }
                 }, fail);
             }
@@ -581,7 +588,7 @@
                     voices.push({ id: id, title: entry.translation && entry.translation.title || 'Оригинал',
                         rows: grouped.rows.filter(function (r) { return String(r.translation && r.translation.id || r.id) === id; }) });
                 });
-                done({ id: result.id, title: result.title, voices: voices });
+                done({ id: result.id, title: result.title, voices: voices, series: grouped.rows.some(function (r) { return Object.keys(r.seasons || {}).length > 0; }) });
             }, fail);
         };
         this.episodes = function (release, voice, done, fail, selectedSeason) {
@@ -688,7 +695,46 @@
         };
     }
 
-    var Core = { VERSION: VERSION, form: form, absolute: absolute, hostSetting: hostSetting, rank: rank,
+    function searchNames(movie) {
+        var ru=String(movie.title||movie.name||'').trim(), en=String(movie.original_title||movie.original_name||'').trim();
+        var year=String(movie.release_date||movie.first_air_date||'').slice(0,4), all=[];
+        [ru,ru+' '+en,en,en+' '+ru].forEach(function (name) {
+            name=name.replace(/\s+/g,' ').trim();if (!name) return;
+            [name,year?name+' '+year:''].forEach(function (q) {if (q && all.indexOf(q)<0) all.push(q);});
+        });return all;
+    }
+    function exactResult(items,movie,query) {
+        if (items.length===1 && items[0].widget) return items[0];
+        var names=[query];if (searchNames(movie).indexOf(query)>=0) names=names.concat([movie.title,movie.name,movie.original_title,movie.original_name]);
+        names=names.map(normal).filter(Boolean);var year=String(movie.release_date||movie.first_air_date||'').slice(0,4);
+        var exact=items.filter(function (r) {return [r.title,r.original].some(function (t) {return t && names.indexOf(normal(t))>=0;});});
+        var sameYear=exact.filter(function (r) {return year && String(r.year)===year;});
+        if (sameYear.length===1) return sameYear[0];
+        if (exact.length===1 && (!year || !exact[0].year || String(exact[0].year)===year)) return exact[0];
+        return null;
+    }
+    function maxQuality(map) {var keys=Object.keys(map||{}).filter(function (k) {return !!map[k];}).sort(function (a,b) {return qualityNumber(b)-qualityNumber(a);});var q=keys.length?qualityNumber(keys[0]):0;return q>=2160?'4K':q?q+'p':'';}
+    function formatDate(value) {var d=new Date(value+'T12:00:00');return isNaN(d.getTime())?'':d.toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});}
+    function progressText(p,remaining) {
+        var time=Math.max(0,+p.time||0),duration=Math.max(0,+p.duration||0);
+        if (!duration) return time?'Просмотрено '+Math.floor(time/60)+' мин.':'';
+        return remaining?'Осталось '+Math.ceil(Math.max(0,duration-time)/60)+' мин.':
+            'Просмотрено '+Math.floor(time/60)+' из '+Math.ceil(duration/60)+' мин. · '+Math.round(+p.percent||time/duration*100)+'%';
+    }
+    function keepVisible(pane,target) {
+        if (!pane || !target || !pane.contains(target)) return;
+        var box=pane.getBoundingClientRect(),rect=target.getBoundingClientRect(),gap=8;
+        if (pane.scrollHeight>pane.clientHeight) {
+            if (rect.bottom>box.bottom-gap) pane.scrollTop+=rect.bottom-box.bottom+gap;
+            if (rect.top<box.top+gap) pane.scrollTop-=box.top-rect.top+gap;
+        }
+        if (pane.scrollWidth>pane.clientWidth) {
+            if (rect.right>box.right-gap) pane.scrollLeft+=rect.right-box.right+gap;
+            if (rect.left<box.left+gap) pane.scrollLeft-=box.left-rect.left+gap;
+        }
+    }
+
+    var Core = { exactResult: exactResult, searchNames: searchNames, maxQuality: maxQuality, keepVisible: keepVisible, progressText: progressText, VERSION: VERSION, form: form, absolute: absolute, hostSetting: hostSetting, rank: rank,
         rezkaDecode: rezkaDecode, kodikDecode: kodikDecode, labelledLinks: labelledLinks, chooseQuality: chooseQuality,
         parseRezkaSearch: parseRezkaSearch, parseRezkaPage: parseRezkaPage, rezkaEpisodes: rezkaEpisodes,
         kodikResults: kodikResults, parseKodikPlayer: parseKodikPlayer, kodikEndpoint: kodikEndpoint, kodikCatalog: kodikCatalog,
@@ -713,6 +759,47 @@
         function buildProviders(io) {
             return [new Kodik(io, setting), new Rezka(io, setting, new RezkaSession(io, setting, save, Lampa)), new Libria(io, setting)];
         }
+        function saveResume(key, value) {
+            var all=object(setting('resume',{})),updated={};
+            Object.keys(all).forEach(function (k) {updated[k]=all[k];});updated[key]=value;
+            Object.keys(updated).sort(function (a,b) {return (+updated[b].updated||0)-(+updated[a].updated||0);}).slice(500).forEach(function (k) {delete updated[k];});
+            save('resume',updated);
+        }
+        var currentPlayback = null, lastProgressSave = 0, activeScreen = null;
+        function paintNextLabel() {
+            if (!Lampa.PlayerPanel || !Lampa.PlayerPanel.render || !currentPlayback) return;
+            Lampa.PlayerPanel.render().find('.player-next__title').text(currentPlayback._lamplay.series ? 'Следующая серия' : 'Следующая озвучка');
+        }
+        if (Lampa.Player && Lampa.Player.listener) {
+            Lampa.Player.listener.follow('start', function (data) {
+                currentPlayback = data && data._lamplay ? data : null;
+                if (currentPlayback) { data._lamplay.updated=Date.now();saveResume(movieKey(data.card), data._lamplay); setTimeout(paintNextLabel, 0); }
+            });
+            Lampa.Player.listener.follow('close', function () {
+                currentPlayback = null;
+                if (activeScreen && activeScreen.playerClosed) activeScreen.playerClosed();
+            });
+        }
+        if (Lampa.PlayerPlaylist && Lampa.PlayerPlaylist.listener) Lampa.PlayerPlaylist.listener.follow('set', paintNextLabel);
+        if (Lampa.PlayerPanel && Lampa.PlayerPanel.listener) Lampa.PlayerPanel.listener.follow('visible', paintNextLabel);
+        if (Lampa.PlayerVideo && Lampa.PlayerVideo.listener) {
+            Lampa.PlayerVideo.listener.follow('timeupdate', function (e) {
+                var data = currentPlayback;
+                if (!data || !data.timeline || !e.duration) return;
+                if (data._lpResumeAt !== undefined) {
+                    var position = Math.max(0, Math.min(data._lpResumeAt, e.duration - 0.5));
+                    // Skip Lampa's optional resume prompt only for the explicit Continue button.
+                    data.timeline.waiting_for_user = false; data.timeline.continued = true;
+                    data.timeline.time = position; data.timeline.percent = position / e.duration * 100;
+                    if (Math.abs(e.current - position) > 2) { Lampa.PlayerVideo.to(position); return; }
+                    delete data._lpResumeAt;
+                }
+                if (Date.now() - lastProgressSave > 4000 && !data.timeline.waiting_for_user) {
+                    lastProgressSave = Date.now();
+                    data.timeline.handler(e.current / e.duration * 100, e.current, e.duration);
+                }
+            });
+        }
         function historySource(movie) {
             var entry = object(setting('source_history', {}))[movieKey(movie)];
             return flag(setting('remember_source', true), true) && entry && entry.source || setting('source', 'kodik');
@@ -721,261 +808,489 @@
             if (flag(setting('remember_source', true), true)) save('source_history', rememberSource(setting('source_history', {}), movie, id));
         }
 
-        function Screen(object) {
-            var self = this, movie = object.movie || {};
-            var io = new Transport(Lampa, setting), providers = buildProviders(io);
+        // Native overflow panes also work on TV: focus explicitly scrolls each pane.
+        // Each strip has its own viewport, so browsing episodes never moves the filters.
+        function Screen(options) {
+            var self = this, movie = options.movie || {}, key = movieKey(movie);
+            var io = new Transport(Lampa, setting), metadataIo = new Transport(Lampa, setting), probeIo = new Transport(Lampa, setting);
+            var providers = buildProviders(io), probeProviders = buildProviders(probeIo);
             var source = providers.filter(function (p) { return p.id === historySource(movie); })[0] || providers[0];
-            var query = movie.title || movie.name || movie.original_title || movie.original_name || '';
-            var release = null, voice = null, episodes = [], season = '', results = null;
-            var destroyed = false, busy = false, last = null, retry = null;
-            var scroll = new Lampa.Scroll({ mask: true, over: true });
-            var html = $('<div class="lamplay"></div>');
-            var panel = $('<div class="lamplay__panel"></div>');
-            html.append(scroll.render());
-            scroll.append(panel);
-            var title = $('<div class="lamplay__title"></div>').text(NAME);
-            var subtitle = $('<div class="lamplay__subtitle"></div>');
-            var controls = $('<div class="lamplay__controls"></div>');
+            var initialQuery = movie.title || movie.name || movie.original_title || movie.original_name || '';
+            var query = initialQuery, release = null, resultSelected = null, voice = null, season = '', episodes = [], results = null;
+            var lastEpisodeKey = null;
+            var busy = false, destroyed = false, last = null, generation = 0, reverse = false, pendingResume = null;
+            var cache = {}, probeQueue = [], probing = 0, observed = null, metadata = { details: movie, seasons: {}, id: null, request: 0, signature: '' };
+            var type = movie.media_type === 'tv' || movie.name || movie.first_air_date ? 'tv' : 'movie';
+            var html = $('<div class="lamplay"></div>'), backdrop = $('<div class="lp-backdrop"></div>');
+            var top = $('<div class="lp-top"></div>');
+            var panel = $('<div class="lp-panel"></div>'), side = $('<aside class="lp-side"></aside>');
+            var hero = $('<div class="lp-hero"></div>'), main = $('<main class="lp-main"></main>');
+            var filters = $('<div class="lp-filters"></div>'), tools = $('<div class="lamplay__controls lp-scroll lp-tools"></div>');
+            var bodyPane = $('<div class="lp-scroll lp-body-pane"></div>'), body = $('<div class="lamplay__items"></div>');
             var status = $('<div class="lamplay__status" role="status"></div>');
-            var body = $('<div class="lamplay__items"></div>');
-            panel.append(title, subtitle, controls, status, body);
-
+            var statusText = $('<span></span>'), retryAction = null;
+            status.append(statusText);side.append(hero);main.append(filters,bodyPane.append(body));panel.append(side,main);
+            html.append(backdrop,status,panel);
             function inActivity() { var a = Lampa.Activity.active(); return !destroyed && a && a.activity === self.activity; }
-            function control(label, action) {
-                var node = $('<div class="lamplay__control selector"></div>').text(label);
-                node.on('hover:enter', action);
-                node.on('hover:focus', function () { last = node[0]; scroll.update(node, true); });
-                controls.append(node); return node;
+            function savedResume() { return object(setting('resume', {}))[key]; }
+            function series() { return release && typeof release.series === 'boolean' ? release.series : type === 'tv'; }
+            function view() { var v = setting(series() ? 'view_series' : 'view_movie', series() ? 'horizontal' : 'vertical'); return ['horizontal','vertical','card'].indexOf(v) < 0 || !series() && v === 'horizontal' ? 'vertical' : v; }
+            function focusNode(node) {
+                node = $(node);last = node[0];if (last && last._lpEpisodeKey) lastEpisodeKey=last._lpEpisodeKey;
+                node.parents('.lp-scroll').each(function () { keepVisible(this,node[0]); });
+                if (node[0] && node[0]._lpProbe) enqueueProbe(node[0]._lpProbe);
             }
-            function row(label, detail, action) {
-                var node = $('<div class="lamplay__item selector"></div>');
-                node.append($('<div class="lamplay__item-title"></div>').text(label));
-                if (detail) node.append($('<div class="lamplay__item-detail"></div>').text(detail));
-                node.on('hover:enter', action);
-                node.on('hover:focus', function () { last = node[0]; scroll.update(node, true); });
-                body.append(node); return node;
+            function interactive(node, action) {
+                node.addClass('selector').attr('tabindex','0');
+                node.on('hover:enter',action).on('hover:focus hover:hover hover:touch focus',function () { focusNode(node); });
+                // Lampa maps pointer/touch to hover:enter; native focus is for accessibility.
+                return node;
+            }
+            function control(label, action, target, selected) {
+                var node = interactive($('<div class="lamplay__control"></div>').text(label),action);
+                if (selected) node.addClass('lp-selected');
+                (target || tools).append(node);return node;
+            }
+            function select(title,items,current,callback) {
+                Lampa.Select.show({title:title,items:items.map(function (i) { return { title:i.title,value:i.value,selected:String(i.value)===String(current) }; }),
+                    onSelect:function (i) { callback(i.value); },onBack:function () { self.start(); }});
+            }
+            function imageURL(path,size) {
+                if (!path) return '';
+                if (/^https?:\/\//.test(path)) return absolute(path);
+                return Lampa.TMDB && Lampa.TMDB.image ? Lampa.TMDB.image('/t/p/' + (size || 'w780') + path) : '';
+            }
+            function setImage(img,url) {
+                if (url) img.attr('src',url).on('error',function () {
+                    if ($(this).hasClass('lp-title-logo')) $(this).replaceWith($('<div class="lp-name"></div>').text(metadata.details.title || metadata.details.name || initialQuery));
+                    else $(this).remove();
+                });
+                return img;
+            }
+            function detailFor(ep) { return (metadata.seasons[String(ep.season)] || []).filter(function (item) { return +item.episode_number === +ep.number; })[0] || {}; }
+            function episodeName(ep) {
+                var m=detailFor(ep), fallback=String(ep.title || '').replace(/^(?:Серия|Эпизод)\s*[\d.]+\s*[·:\-]?\s*/i,'').trim();
+                if (/^[\d.]+(?:\s*(?:серия|эпизод))?$/i.test(fallback)) fallback='';
+                return m.name || fallback || 'Серия '+ep.number;
+            }
+            function thumbnail(ep) { return imageURL(detailFor(ep).still_path,'w500') || imageURL(metadata.details.backdrop_path || metadata.details.poster_path,'w780'); }
+            function voiceOf(ep) { return ep.voice || voice || { id:'default',title:'' }; }
+            function streamKey(ep) { return [source.id,release.id,voiceOf(ep).id,ep.season,ep.number].join('|'); }
+            function stopProbes() {
+                probeIo.clear();probeQueue=[];probing=0;
+                if (observed) observed.disconnect();observed=null;
+            }
+            function changeGeneration() { generation++;stopProbes();io.clear(); }
+            function setStatus(message,error) {
+                statusText.text(message || '');status.toggle(!!message);status.toggleClass('lp-error',!!error).toggleClass('lp-busy',busy);
+                status.find('.lp-retry').remove();
+                if (error && retryAction) status.append(interactive($('<span class="lp-retry">Повторить попытку</span>'),function () { retryAction(); }));
+            }
+            function begin(message,retry) { changeGeneration();busy=true;retryAction=retry;setStatus(message);refreshControls();self.start(); }
+            function finish() { busy=false;setStatus('');refreshControls(); }
+            function failed(e) { if (destroyed) return;busy=false;setStatus(safeError(e),true);refreshControls();self.start(); }
+            function cancel() { changeGeneration();busy=false;setStatus('Загрузка отменена. Измените поиск или источник.');refreshControls();self.start(); }
+            function layout() {
+                var v = release ? view() : 'results';
+                html.attr('data-view',v).toggleClass('lp-series',!!release && series()).toggleClass('lp-film',!!release && !series());
+                if (release && series() && v !== 'vertical') {
+                    side.detach();main.detach();filters.append(tools);top.append(hero,filters);panel.append(top,bodyPane);
+                } else {
+                    top.detach();side.append(hero,tools);main.append(filters,bodyPane);panel.append(side,main);
+                }
+                var bg = imageURL(metadata.details.backdrop_path,'original');
+                backdrop.empty();if (bg) backdrop.append(setImage($('<img alt="">'),bg));
+            }
+            function searchMenu() {
+                var options = searchNames(movie).map(function (q) {return {title:q,value:q};});
+                options.unshift({title:'Указать название',value:'__input'});
+                select('Название для поиска',options,query,function (value) {
+                    if (value === '__input') {
+                        Lampa.Input.edit({title:'Название для поиска',value:query,free:true,nosave:true},function (v) {
+                            v=String(v||'').trim();if (v) {query=v;search();} else self.start();
+                        });
+                    } else {query=value;search();}
+                });
             }
             function refreshControls() {
-                controls.empty();
-                control('Источник: ' + source.title, chooseSource);
-                control('Поиск', searchInput);
-                control('Повторить', function () { if (retry) retry(); else search(); });
-                if (release) {
-                    control('К результатам', backToResults);
-                    if (release.voices.length > 1) control('Озвучка: ' + (voice && voice.title || 'Выбрать'), chooseVoice);
+                tools.empty();filters.empty();
+                if (release && series()) {
                     var seasons = seasonList();
-                    if (seasons.length > 1) control('Сезон: ' + season, chooseSeason);
+                    var seasonStrip = $('<div class="lp-strip-group"><div class="lp-caption">Сезоны</div><div class="lp-scroll lp-strip"></div></div>');
+                    seasons.forEach(function (s) {control('Сезон '+s,function () {season=String(s);loadEpisodes();},seasonStrip.find('.lp-strip'),String(s)===String(season));});
+                    var voicesStrip = $('<div class="lp-strip-group"><div class="lp-caption">Перевод</div><div class="lp-scroll lp-strip"></div></div>');
+                    release.voices.forEach(function (v) {control(v.title,function () {voice=v;loadEpisodes();},voicesStrip.find('.lp-strip'),String(v.id)===String(voice.id));});
+                    filters.append(seasonStrip,voicesStrip);
                 }
-                control('Качество: ' + (setting('quality', '1080') === 'auto' ? 'Лучшее' : setting('quality', '1080') + 'p'), chooseQualityMenu);
-                if (busy) control('Отменить', cancel);
-                subtitle.text(source.title + ' · ' + (release ? release.title : query));
-                last = null;
-            }
-            function begin(message, again) {
-                io.clear(); busy = true; retry = again;
-                status.text(message); refreshControls(); self.start();
-            }
-            function finish() { busy = false; status.text(''); refreshControls(); }
-            function failed(error) {
-                if (destroyed) return;
-                busy = false;
-                status.text(safeError(error));
-                refreshControls(); self.start();
-            }
-            function cancel() {
-                io.clear(); busy = false;
-                status.text('Загрузка отменена. Можно повторить запрос или выбрать другой источник.');
-                refreshControls(); self.start();
-            }
-            function select(title, items, selected, callback) {
-                Lampa.Select.show({ title: title, items: items.map(function (item) {
-                    return { title: item.title, value: item.value, selected: String(item.value) === String(selected) };
-                }), onSelect: function (item) { callback(item.value); }, onBack: function () { self.start(); } });
-            }
-            function chooseSource() {
-                select('Источник', providers.map(function (p) { return { title: p.title, value: p.id }; }), source.id, function (value) {
-                    source = providers.filter(function (p) { return p.id === value; })[0];
-                    saveSource(movie, source.id); search();
+                control('Источник: '+source.title,function () {
+                    select('Источник',providers.map(function (p) {return {title:p.title,value:p.id};}),source.id,function (id) {
+                        source=providers.filter(function (p) {return p.id===id;})[0];saveSource(movie,id);pendingResume=null;search();
+                    });
                 });
-            }
-            function searchInput() {
-                Lampa.Input.edit({ title: 'Название для поиска', value: query, free: true, nosave: true }, function (value) {
-                    value = String(value || '').trim();
-                    if (value && value !== query) { query = value; search(); } else self.start();
+                if (release && series()) control('Порядок: '+(reverse?'Обратный':'Стандартный'),function () {reverse=!reverse;renderEpisodes();});
+                if (release) control('Вид: '+({horizontal:'Горизонтальный',vertical:'Вертикальный',card:'Карточка'}[view()]),function () {
+                    var names=series()?['horizontal','vertical','card']:['vertical','card'];
+                    select('Вид',names.map(function (v) {return {title:{horizontal:'Горизонтальный',vertical:'Вертикальный',card:'Карточка'}[v],value:v};}),view(),function (v) {
+                        var selected=lastEpisodeKey;
+                        save(series()?'view_series':'view_movie',v);renderEpisodes(selected);
+                    });
                 });
-            }
-            function chooseVoice() {
-                select('Озвучка', release.voices.map(function (v) { return { title: v.title, value: v.id }; }), voice && voice.id, function (value) {
-                    voice = release.voices.filter(function (v) { return String(v.id) === String(value); })[0];
-                    season = ''; loadEpisodes();
-                });
-            }
-            function seasonList() {
-                var values = [];
-                episodes.forEach(function (ep) { if (ep.season !== '' && values.indexOf(String(ep.season)) < 0) values.push(String(ep.season)); });
-                return values.sort(numSort);
-            }
-            function chooseSeason() {
-                select('Сезон', seasonList().map(function (s) { return { title: 'Сезон ' + s, value: s }; }), season, function (value) {
-                    season = String(value);
-                    if (visibleEpisodes().some(function (ep) { return ep.loadSeason; })) loadEpisodes();
-                    else renderEpisodes();
-                });
-            }
-            function chooseQualityMenu() {
-                select('Предпочитаемое качество', ['auto', '2160', '1080', '720', '480', '360'].map(function (q) {
-                    return { title: q === 'auto' ? 'Лучшее доступное' : q + 'p', value: q };
-                }), setting('quality', '1080'), function (value) { save('quality', value); refreshControls(); self.start(); });
+                control('Сбросить фильтр',function () {query=initialQuery;pendingResume=null;search();});
+                control('⌕ '+query,searchMenu).attr('aria-label','Поиск');
+                if (release) control('К результатам',backToResults);
+                if (busy) control('Отменить',cancel);
+                layout();
             }
             function search() {
-                release = null; voice = null; episodes = []; results = null; body.empty();
-                if (!query) { refreshControls(); return failed(new Error('У карточки нет названия. Нажмите «Поиск».')); }
-                begin('Ищем «' + query + '»…', search);
+                release=null;resultSelected=null;voice=null;episodes=[];results=null;body.empty();
+                if (!query) return failed(new Error('Укажите название для поиска.'));
+                begin('Ищем «'+query+'»…',search);
                 function found(items) {
-                    if (destroyed) return;
-                    results = items; finish(); showResults();
+                    if (destroyed) return;results=items;finish();
+                    var resume=savedResume(), best;
+                    if (flag(setting('remember_source',true),true) && resume && resume.source===source.id && query===initialQuery) {
+                        best=items.filter(function (r) {return String(r.id)===String(resume.result.id);})[0];
+                    }
+                    best=best || exactResult(items,movie,query);
+                    if (best) openRelease(best);else showResults();
                 }
-                source.search(query, movie, function (items) {
-                    var original = movie.original_title || movie.original_name || '';
-                    if (!items.length && original && normal(original) !== normal(query)) {
-                        status.text('Ищем по оригинальному названию «' + original + '»…');
-                        source.search(original, movie, found, failed);
-                    } else found(items);
-                }, failed);
+                source.search(query,movie,function (items) {
+                    var original=movie.original_title || movie.original_name || '';
+                    if (!items.length && query===initialQuery && original && normal(original)!==normal(query)) source.search(original,movie,found,failed);
+                    else found(items);
+                },failed);
             }
             function showResults() {
-                retry = search;
-                body.empty(); refreshControls();
-                if (!results || !results.length) status.text('Ничего не найдено. Уточните название через «Поиск» или смените источник.');
-                else {
-                    status.text('Выберите подходящий результат: ' + results.length);
-                    results.forEach(function (result) { row(result.title, [result.year, result.original, result.description].filter(Boolean).join(' · '), function () { openRelease(result); }); });
-                }
-                self.start();
+                body.empty();refreshControls();renderHero();
+                setStatus(results && results.length ? 'Выберите подходящий результат: '+results.length : 'Ничего не найдено. Измените запрос или источник.');
+                (results||[]).forEach(function (r) {
+                    var node=interactive($('<div class="lamplay__item lp-result"></div>'),function () {openRelease(r);});
+                    node.append($('<div class="lamplay__item-title"></div>').text(r.title),$('<div class="lamplay__item-detail"></div>').text([r.description || r.year,r.original].filter(Boolean).join(' · ')));
+                    body.append(node);
+                });
+                last=body.find('.selector')[0] || tools.find('.selector')[0];self.start();
             }
-            function backToResults() {
-                io.clear(); busy = false; release = null; voice = null; episodes = [];
-                showResults();
-            }
+            function backToResults() {changeGeneration();busy=false;pendingResume=null;release=null;voice=null;episodes=[];showResults();}
             function openRelease(result) {
-                body.empty();
-                begin('Загружаем переводы и серии…', function () { openRelease(result); });
-                source.open(result, function (data) {
-                    release = data; voice = release.voices[0]; season = '';
-                    if (!voice) return failed(new Error('Для релиза нет доступных переводов.'));
+                if (source.id==='rezka' && result.url) {
+                    result=Object.assign({},result);var old=new root.URL(result.url);result.url=hostSetting(setting('rezka_host',''),'https://rezka.ag')+old.pathname+old.search;
+                }
+                body.empty();begin('Загружаем переводы и серии…',function () {openRelease(result);});resultSelected=result;
+                source.open(result,function (r) {
+                    release=r;voice=r.voices[0];season='';loadMetadata(result);
+                    var saved=pendingResume || savedResume();
+                    if (saved && saved.source===source.id && String(saved.result.id)===String(result.id)) {
+                        voice=r.voices.filter(function (v) {return String(v.id)===String(saved.voice.id);})[0] || voice;
+                        season=String(saved.season || '');
+                    }
+                    if (!voice) return failed(new Error('Нет доступных переводов.'));
                     loadEpisodes();
-                }, failed);
+                },failed);
+            }
+            function seasonList() {
+                var values=[];episodes.forEach(function (ep) {var s=String(ep.season||'');if (s && values.indexOf(s)<0) values.push(s);});return values.sort(numSort);
             }
             function loadEpisodes() {
-                body.empty();
-                begin('Получаем список серий…', loadEpisodes);
-                source.episodes(release, voice, function (items) {
-                    episodes = items;
-                    var seasons = seasonList();
-                    if (seasons.indexOf(season) < 0) season = seasons[0] || '';
-                    finish(); renderEpisodes();
-                }, failed, season);
+                body.empty();begin('Получаем список…',loadEpisodes);
+                if (!series()) {
+                    var jobs=release.voices.slice(), count=0, items=[], ticket=generation, errors=[], finished=false;
+                    function next() {
+                        if (destroyed || ticket!==generation || finished) return;
+                        while (count<2 && jobs.length) {
+                            count++;(function (v) {
+                                source.episodes(release,v,function (rows) {rows.forEach(function (ep) {ep.voice=v;items.push(ep);});complete();},function (err) {errors.push(safeError(err));complete();});
+                            })(jobs.shift());
+                        }
+                        if (!finished && !count && !jobs.length) {
+                            finished=true;episodes=items.sort(function (a,b) {return release.voices.indexOf(a.voice)-release.voices.indexOf(b.voice);});
+                            finish();if (!items.length) return failed(new Error(errors[0] || 'Не удалось получить озвучки.'));
+                            renderEpisodes();resumeWhenReady();
+                        }
+                    }
+                    function complete() {count--;next();}next();return;
+                }
+                source.episodes(release,voice,function (items) {
+                    episodes=items;
+                    var seasons=seasonList();if (seasons.indexOf(season)<0) season=seasons[0] || '';
+                    finish();renderEpisodes();loadSeasonMetadata(season);resumeWhenReady();
+                },failed,season);
             }
-            function visibleEpisodes() { return episodes.filter(function (ep) { return !season || String(ep.season) === season; }); }
-            function timeline(ep) {
-                if (!Lampa.Timeline) return false;
-                var movieId = (movie.source || 'tmdb') + ':' + (movie.id || movie.original_title || movie.title || release.title);
-                // Keep Timeline keys from 0.1.0 so renaming does not reset progress.
-                return Lampa.Timeline.view(Lampa.Utils.hash('wf_online|' + movieId + '|' + source.id + '|' + release.id + '|' + ep.season + '|' + ep.number));
+            function visibleEpisodes() {var items=episodes.filter(function (ep) {return !series() || !season || String(ep.season)===season;});return reverse?items.slice().reverse():items;}
+            function progress(ep) {
+                var base='wf_online|'+(movie.source||'tmdb')+':'+(movie.id||movie.original_title||movie.title||release.title)+'|'+source.id+'|'+release.id+'|'+ep.season+'|'+ep.number;
+                var hash=Lampa.Utils.hash(base+'|voice='+voiceOf(ep).id);
+                var view=Lampa.Timeline?Lampa.Timeline.view(hash):{hash:hash,time:0,duration:0,percent:0};
+                var resume = savedResume();
+                if (!view.time && resume && resume.hash===hash) ['time','duration','percent'].forEach(function (k) {view[k]=+resume[k]||0;});
+                if (!view.time && !view.percent && Lampa.Timeline && String(voiceOf(ep).id)===String(release.voices[0].id)) {
+                    var previous=Lampa.Timeline.view(Lampa.Utils.hash(base));
+                    ['time','duration','percent'].forEach(function (k) {if (previous[k]) view[k]=previous[k];});
+                }
+                return view;
             }
-            function renderEpisodes() {
-                retry = loadEpisodes;
-                body.empty(); refreshControls();
-                var items = visibleEpisodes();
-                status.text(items.length ? 'Выберите ' + (season ? 'серию' : 'видео') : 'Доступных серий для этой озвучки нет.');
-                items.forEach(function (ep, index) {
-                    var full = flag(setting('full_episode_title', true), true);
-                    var label = ep.loadSeason ? ep.title : episodeTitle(release.title, ep, voice.title, full);
-                    var node = row(label, full ? '' : [season ? 'Сезон ' + season : '', voice && voice.title].filter(Boolean).join(' · '), function () {
-                        if (ep.loadSeason) loadEpisodes(); else play(ep, index, items);
-                    });
-                    var view = timeline(ep);
-                    if (view && Lampa.Timeline.render) node.append(Lampa.Timeline.render(view));
+            function snapshot(ep,view) {
+                var r=resultSelected, storedResult={};
+                ['id','title','original','url','year','widget','translation'].forEach(function (k) {if (r[k]!==undefined) storedResult[k]=r[k];});
+                if (r.rows && r.rows.length) storedResult.rows=[r.rows[0]];
+                return {source:source.id,sourceTitle:source.title,result:storedResult,voice:{id:voiceOf(ep).id,title:voiceOf(ep).title},
+                    season:ep.season,number:ep.number,episodeTitle:series()?episodeName(ep):'',thumbnail:series()?thumbnail(ep):'',
+                    time:+view.time||0,duration:+view.duration||0,percent:+view.percent||0,hash:view.hash,series:series(),updated:Date.now()};
+            }
+            function record(snapshot) {saveResume(key,snapshot);}
+            function renderHero() {
+                hero.empty();var d=metadata.details, resume=savedResume();
+                var image=imageURL(d.backdrop_path || d.poster_path,'w780');
+                if (image) hero.append(setImage($('<img class="lp-cover" alt="">'),image));
+                var content=$('<div class="lp-hero-content"></div>');
+                if (metadata.logo) content.append(setImage($('<img class="lp-title-logo" alt="">').attr('alt',initialQuery),metadata.logo));
+                else content.append($('<div class="lp-name"></div>').text(d.title||d.name||initialQuery));
+                if (resume) {
+                    var label='Продолжить'+(resume.series?' · S'+resume.season+' E'+resume.number:'');
+                    content.append(interactive($('<div class="lp-continue"></div>').text('▶ '+label),resumePlay));
+                    content.append($('<div class="lp-resume-detail"></div>').text([resume.sourceTitle,resume.voice.title,resume.episodeTitle,progressText(resume,true)].filter(Boolean).join(' · ')));
+                    content.append($('<div class="lp-progress"><i></i></div>').find('i').css('width',Math.max(0,Math.min(100,resume.percent))+'%').end());
+                } else content.append($('<div class="lp-resume-detail"></div>').text('Выберите '+(release && !series()?'озвучку':'серию')+' для просмотра'));
+                hero.append(content);
+            }
+            function resumePlay() {
+                var saved=savedResume();if (!saved || busy) return;
+                pendingResume=saved;
+                source=providers.filter(function (p) {return p.id===saved.source;})[0] || source;
+                saveSource(movie,source.id);openRelease(saved.result);
+            }
+            function resumeWhenReady() {
+                if (!pendingResume) return;
+                var saved=pendingResume;
+                var ep=episodes.filter(function (e) {return !e.loadSeason && String(e.season)===String(saved.season) && String(e.number)===String(saved.number) && String(voiceOf(e).id)===String(saved.voice.id);})[0];
+                pendingResume=null;
+                if (!ep) return failed(new Error('Последняя серия или озвучка сейчас недоступна. Выберите другой вариант.'));
+                play(ep,true);
+            }
+            function renderEpisodes(restore) {
+                if (!release || destroyed) return;stopProbes();body.empty();refreshControls();renderHero();setStatus('');
+                var ticket=generation;
+                visibleEpisodes().forEach(function (ep) {
+                    if (ep.loadSeason) {body.append(interactive($('<div class="lamplay__item"></div>').text(ep.title),loadEpisodes));return;}
+                    var v=voiceOf(ep), m=series()?detailFor(ep):metadata.details, p=progress(ep);
+                    var node=interactive($('<div class="lamplay__item lp-episode"></div>'),function () {play(ep);});
+                    node[0]._lpEpisodeKey=streamKey(ep);
+                    var picture=$('<div class="lp-picture"></div>');
+                    var img=series()?thumbnail(ep):'';
+                    if (img) picture.append(setImage($('<img alt="" loading="lazy">'),img));
+                    if (series()) picture.append($('<span class="lp-episode-number"></span>').text('S'+ep.season+':E'+ep.number));
+                    var badge=$('<span class="lp-quality"></span>');picture.append(badge);
+                    var duration=+p.duration || (series()?+m.runtime*60:+m.runtime*60) || 0;
+                    picture.append($('<span class="lp-runtime"></span>').text(duration?Math.ceil(duration/60)+' мин.':''));
+                    var line=$('<div class="lp-progress"><i></i></div>');line.find('i').css('width',Math.max(0,Math.min(100,+p.percent||0))+'%');picture.append(line);
+                    var info=$('<div class="lp-episode-info"></div>');
+                    info.append($('<div class="lamplay__item-title"></div>').text(series()?episodeName(ep):v.title));
+                    if (p.time) info.append($('<div class="lp-watched"></div>').text(progressText(p,false)));
+                    var details=[];if (series() && +m.vote_average>0) details.push('★ '+Number(m.vote_average).toFixed(1));
+                    if (m.air_date || m.release_date) details.push(formatDate(m.air_date || m.release_date));
+                    if (!series() && duration) details.push(Math.ceil(duration/60)+' мин.');
+                    info.append($('<div class="lamplay__item-detail"></div>').text(details.join(' · ')));
+                    var desc=series()?m.overview:m.tagline;
+                    if (desc) info.append($('<div class="lp-description"></div>').text(desc));
+                    node.append(picture,info);body.append(node);
+                    var task={ep:ep,node:node,badge:badge,ticket:ticket,source:source.id,key:streamKey(ep),release:release};node[0]._lpProbe=task;
+                    var hit=cache[task.key];if (hit && Date.now()-hit.time<60000) showQuality(task,hit.streams);
                 });
-                self.start();
+                if (root.IntersectionObserver) {
+                    observed=new root.IntersectionObserver(function (entries) {entries.forEach(function (entry) {if (entry.isIntersecting && entry.target._lpProbe) enqueueProbe(entry.target._lpProbe);});},{root:bodyPane[0],rootMargin:'0px'});
+                    body.find('.lp-episode').each(function () {observed.observe(this);});
+                }
+                last=restore?body.find('.lp-episode').filter(function () {return this._lpEpisodeKey===restore;})[0]:null;
+                last=last || body.find('.selector')[0] || tools.find('.selector')[0];self.start();
             }
-            function playerCell(ep, streams) {
-                streams = prepareStreams(streams, setting);
-                var view = timeline(ep);
-                return { url: chooseQuality(streams.quality, setting('quality', '1080')), quality: streams.quality,
-                    subtitles: streams.subtitles && streams.subtitles.length ? streams.subtitles : false,
-                    title: episodeTitle(release.title, ep, voice.title, flag(setting('full_episode_title', true), true)),
-                    timeline: view, card: movie, season: ep.season ? +ep.season : undefined, episode: ep.number !== '' ? +ep.number : undefined };
+            function showQuality(task,streams) {
+                if (!task.node[0].isConnected || task.ticket!==generation) return;
+                var q=maxQuality(streams.quality);task.badge.text(q).toggle(!!q);
             }
-            function play(ep, index, items) {
+            function enqueueProbe(task) {
+                if (destroyed || busy || task.ticket!==generation) return;
+                var hit=cache[task.key];if (hit && Date.now()-hit.time<60000) return showQuality(task,hit.streams);
+                if (task.requested) return;task.requested=true;probeQueue.push(task);pumpProbes();
+            }
+            function pumpProbes() {
+                while (probing<2 && probeQueue.length) {
+                    var task=probeQueue.shift();if (task.ticket!==generation) continue;
+                    probing++;(function (t) {
+                        var provider=probeProviders.filter(function (p) {return p.id===t.source;})[0];
+                        provider.resolve(t.release,t.ep,function (streams) {
+                            if (t.ticket!==generation || destroyed) return;
+                            cache[t.key]={time:Date.now(),streams:streams};showQuality(t,streams);probing--;pumpProbes();
+                        },function () {if (t.ticket!==generation || destroyed) return;probing--;pumpProbes();});
+                    })(task);
+                }
+            }
+            function cell(ep) {
+                var v=voiceOf(ep), m=detailFor(ep), view=progress(ep), state=snapshot(ep,view), handler=view.handler;
+                view.handler=function (percent,time,duration) {
+                    view.percent=percent;view.time=time;view.duration=duration;
+                    if (handler) handler(percent,time,duration);
+                    state.percent=percent;state.time=time;state.duration=duration;state.updated=Date.now();record(state);
+                };
+                return {title:series()?(flag(setting('full_episode_title',true),true)?'[S'+ep.season+':E'+ep.number+'] '+episodeName(ep):'Серия '+ep.number):v.title,
+                    thumbnail:series()?thumbnail(ep):undefined,card:movie,timeline:view,
+                    season:series()?+ep.season:undefined,episode:series()?+ep.number:undefined,
+                    _lamplay:state,_lpEpisode:ep,subtitles:false};
+            }
+            function resolveCell(item,done,fail) {
+                var ep=item._lpEpisode, hit=cache[streamKey(ep)];
+                function ready(streams) {
+                    try {streams=prepareStreams(streams,setting);item.url=chooseQuality(streams.quality,setting('quality','1080'));item.quality=streams.quality;item.subtitles=streams.subtitles && streams.subtitles.length?streams.subtitles:false;if (!item.url) throw new Error('Нет доступного видеопотока.');done();}
+                    catch(e) {fail(e);}
+                }
+                if (hit && Date.now()-hit.time<60000) ready(hit.streams);else source.resolve(release,ep,ready,fail);
+            }
+            function play(ep,resuming) {
                 if (busy) return;
-                begin('Получаем ссылку на видео…', function () { play(ep, index, items); });
-                source.resolve(release, ep, function (streams) {
-                    var first;
-                    try { first = playerCell(ep, streams); } catch (e) { return failed(e); }
-                    if (!first.url) return failed(new Error('Источник не вернул подходящее качество.'));
-                    saveSource(movie, source.id);
-                    finish();
-                    var playlist = items.map(function (item, i) {
-                        if (i === index) return first;
-                        var cell = { title: episodeTitle(release.title, item, voice.title, flag(setting('full_episode_title', true), true)), timeline: timeline(item), card: movie,
-                            season: item.season ? +item.season : undefined, episode: item.number !== '' ? +item.number : undefined };
-                        cell.url = function (callback) {
-                            source.resolve(release, item, function (next) {
-                                var resolved;
-                                try { resolved = playerCell(item, next); }
-                                catch (e) { cell.url = ''; Lampa.Noty.show(safeError(e)); callback(); return; }
-                                Object.keys(resolved).forEach(function (key) { cell[key] = resolved[key]; });
-                                callback();
-                            }, function (err) { cell.url = ''; Lampa.Noty.show(safeError(err)); callback(); });
-                        };
-                        return cell;
-                    });
-                    if (movie.id && Lampa.Favorite) Lampa.Favorite.add('history', movie, 100);
-                    Lampa.Player.play(first);
-                    Lampa.Player.playlist(playlist);
-                }, failed);
+                begin('Получаем видеопоток…',function () {play(ep,resuming);});
+                var items=episodes.filter(function (e) {return !e.loadSeason && (!series() || !season || String(e.season)===season);}).slice();
+                if (series()) items.sort(function (a,b) {return +a.season-+b.season || +a.number-+b.number;});
+                var playlist=items.map(cell), index=items.indexOf(ep), first=playlist[index];
+                if (!first) return failed(new Error('Серия не найдена.'));
+                playlist.forEach(function (item) {item.url=function (callback) {resolveCell(item,callback,function (e) {item.url='';Lampa.Noty.show(safeError(e));callback();});};});
+                resolveCell(first,function () {
+                    saveSource(movie,source.id);record(first._lamplay);finish();renderHero();
+                    if (movie.id && Lampa.Favorite) Lampa.Favorite.add('history',movie,100);
+                    if (resuming && first.timeline.time>0) { first._lpResumeAt=first.timeline.time;first.timeline.percent=0; }
+                    Lampa.Player.play(first);Lampa.Player.playlist(playlist);
+
+                },failed);
             }
-            this.create = function () { refreshControls(); search(); return html; };
-            this.render = function () { return html; };
-            this.start = function () {
-                if (!inActivity()) return;
-                Lampa.Controller.add('content', {
-                    toggle: function () {
-                        Lampa.Controller.collectionSet(html);
-                        Lampa.Controller.collectionFocus(last && html[0].contains(last) ? last : false, html);
-                    },
-                    up: function () { if (root.Navigator.canmove('up')) root.Navigator.move('up'); else Lampa.Controller.toggle('head'); },
-                    down: function () { root.Navigator.move('down'); },
-                    left: function () { if (root.Navigator.canmove('left')) root.Navigator.move('left'); else Lampa.Controller.toggle('menu'); },
-                    right: function () { root.Navigator.move('right'); },
-                    back: self.back
+            function metadataRequest(path,done,fail) {
+                if (!Lampa.TMDB || !Lampa.TMDB.api || !Lampa.TMDB.key) return fail && fail();
+                var url=Lampa.TMDB.api(path+(path.indexOf('?')<0?'?':'&')+'api_key='+encodeURIComponent(Lampa.TMDB.key()));
+                metadataIo.request(url,null,'json',done,fail || function () {});
+            }
+            function loadMetadata(target) {
+                if (!Lampa.TMDB) return;
+                var sameCard = !target || [movie.title,movie.name,movie.original_title,movie.original_name].some(function (name) {return name && normal(name)===normal(target.title);});
+                var sourceType = target && release ? (series()?'tv':'movie') : type;
+                var cardYear=String(movie.release_date||movie.first_air_date||'').slice(0,4);
+                if (target && target.year && cardYear && String(target.year)!==cardYear || sourceType!==type) sameCard=false;
+                var directId = sameCard && (!movie.source || ['tmdb','cub'].indexOf(movie.source)>=0) ? movie.id : null;
+                var name = target && target.title || initialQuery;
+                var year = target && target.year || String(movie.release_date || movie.first_air_date || '').slice(0,4);
+                var signature = sourceType+'|'+(directId || name+'|'+year);
+                if (metadata.signature===signature) return;
+                metadata.signature=signature;metadata.id=null;metadata.seasons={};metadata.logo='';
+                metadata.details=sameCard?movie:{title:name};var ticket=++metadata.request;
+                function detail(id) {
+                    if (ticket!==metadata.request || destroyed) return;metadata.id=id;
+                    metadataRequest(sourceType+'/'+id+'?language=ru&append_to_response=images&include_image_language=ru,en,null',function (d) {
+                        if (destroyed || ticket!==metadata.request) return;metadata.details=d;
+                        var logos=list(d.images && d.images.logos);var logo=logos.filter(function (l) {return l.iso_639_1==='ru';})[0] || logos.filter(function (l) {return l.iso_639_1==='en';})[0] || logos[0];
+                        metadata.logo=logo && imageURL(logo.file_path,'w500');renderHero();layout();
+                        if (release && !busy) {renderEpisodes(last && last._lpEpisodeKey);if (series()) loadSeasonMetadata(season);}
+                    });
+                }
+                if (directId) return detail(directId);
+                metadataRequest('search/'+sourceType+'?language=ru&query='+encodeURIComponent(name),function (data) {
+                    if (destroyed || ticket!==metadata.request) return;
+                    var items=list(data.results).map(function (r) {return {id:r.id,title:r.title||r.name,original:r.original_title||r.original_name,year:String(r.release_date||r.first_air_date||'').slice(0,4)};});
+                    var card={title:name,release_date:year?year+'-01-01':''};var hit=exactResult(items,card,name);
+                    if (hit) detail(hit.id);
                 });
+            }
+            function loadSeasonMetadata(s) {
+                if (!metadata.id || !s || own(metadata.seasons,String(s))) return;
+                metadata.seasons[String(s)]=[];var ticket=metadata.request;
+                metadataRequest('tv/'+metadata.id+'/season/'+encodeURIComponent(s)+'?language=ru',function (d) {
+                    if (destroyed || ticket!==metadata.request) return;metadata.seasons[String(s)]=list(d.episodes);
+                    if (release && String(season)===String(s)) renderEpisodes(last && last._lpEpisodeKey);
+                },function () {delete metadata.seasons[String(s)];});
+            }
+            this.create=function () {activeScreen=self;renderHero();refreshControls();loadMetadata();search();return html;};
+            this.render=function () {return html;};
+            this.start=function () {
+                if (!inActivity()) return;
+                renderHero();
+                Lampa.Controller.add('content',{toggle:function () {
+                    Lampa.Controller.collectionSet(html);
+                    var target=last && html[0].contains(last)?last:body.find('.selector')[0] || tools.find('.selector')[0];
+                    Lampa.Controller.collectionFocus(target || false,html);if (target) focusNode(target);
+                },up:function () {move('up','head');},down:function () {move('down');},left:function () {move('left','menu');},right:function () {move('right');},back:self.back});
                 Lampa.Controller.toggle('content');
             };
-            this.back = function () {
-                if (busy) { cancel(); return; }
-                if (release) backToResults();
-                else Lampa.Activity.backward();
-            };
-            this.pause = function () {};
-            this.stop = function () {};
-            this.destroy = function () { destroyed = true; io.clear(); scroll.destroy(); html.remove(); };
+            function move(dir,fallback) {if (root.Navigator.canmove(dir)) root.Navigator.move(dir);else if (fallback) Lampa.Controller.toggle(fallback);}
+            this.back=function () {if (busy) return cancel();if (release) return backToResults();Lampa.Activity.backward();};
+            this.pause=function () {};this.stop=function () {};
+            this.playerClosed=function () {if (release && !busy) renderEpisodes(lastEpisodeKey);else renderHero();};
+            this.destroy=function () {destroyed=true;if (activeScreen===self) activeScreen=null;changeGeneration();metadataIo.clear();html.remove();};
         }
 
-        $('<style id="lamplay-style"></style>').text(
-            '.lamplay-logo{width:1.6em;height:1.6em;flex-shrink:0;fill:currentColor}' +
-            '.view--lamplay-direct{color:#fff}.view--lamplay-direct.focus{color:#111;background:#fff}' +
-            '.lamplay{height:100%}.lamplay__panel{padding:1.4em 1.5em 3em}' +
-            '.lamplay__title{font-size:1.5em;font-weight:600}.lamplay__subtitle{opacity:.65;margin:.5em 0 1em;overflow-wrap:break-word}' +
-            '.lamplay__controls{display:flex;flex-wrap:wrap;margin-bottom:1em}' +
-            '.lamplay__control{padding:.65em .9em;margin:0 .5em .5em 0;background:rgba(255,255,255,.1);border-radius:.4em}' +
-            '.lamplay__status{opacity:.8;line-height:1.5;margin:.5em 0 1em;white-space:pre-wrap}' +
-            '.lamplay__item{padding:1em;margin-bottom:.55em;background:rgba(255,255,255,.07);border-radius:.45em}' +
-            '.lamplay__item-title{font-size:1.1em;overflow-wrap:break-word}.lamplay__item-detail{opacity:.65;font-size:.85em;margin-top:.4em}' +
-            '.lamplay .selector.focus{background:#fff;color:#111}.lamplay__item .time-line{margin-top:.6em}' +
-            '@media(max-width:600px){.lamplay__panel{padding:1em .7em 3em}.lamplay__title{font-size:1.2em}}'
-        ).appendTo('head');
+        $('<style id="lamplay-style"></style>').text([
+            ".lamplay-logo{width:1.6em;height:1.6em;flex-shrink:0;fill:currentColor}",
+            ".full-start-new__buttons .view--lamplay-direct{width:auto!important;max-width:none!important;flex-shrink:0;color:#fff}",
+            ".full-start-new__buttons .view--lamplay-direct span{display:block!important;max-width:none!important;width:auto!important;opacity:1!important;visibility:visible!important;margin-left:.5em}",
+            ".full-start-new__buttons .view--lamplay-direct.focus{color:#111;background:#fff}",
+            ".lamplay{height:100%;min-height:0;position:relative;overflow:hidden;background:#151b27;color:#fff;isolation:isolate}",
+            ".lp-backdrop{position:absolute;top:0;right:0;bottom:0;left:0;z-index:-1;pointer-events:none;background:#151b27}",
+            ".lp-backdrop img{width:100%;height:100%;object-fit:cover;opacity:.2}",
+            ".lamplay[data-view=card] .lp-backdrop img{opacity:.65}",
+            ".lp-backdrop:after{content:'';position:absolute;top:0;right:0;bottom:0;left:0;background:linear-gradient(90deg,rgba(10,15,24,.8),rgba(10,15,24,.25)),linear-gradient(0deg,rgba(10,15,24,.95),transparent 75%)}",
+            ".lp-panel{height:100%;box-sizing:border-box;padding:1em 1.3em;display:flex;gap:1em;min-height:0}",
+            ".lp-side,.lp-main{min-width:0;min-height:0;display:flex;flex-direction:column;gap:.65em}",
+            ".lp-side{width:30%;flex-shrink:0}.lp-main{overflow:hidden;flex:1}.lp-top{display:flex;gap:1em;min-height:0;flex-shrink:0}.lp-top>.lp-hero{width:32%}.lp-top>.lp-filters{flex:1;min-width:0}",
+            ".lp-hero{height:26vh;min-height:9em;max-height:17em;flex-shrink:0;position:relative;overflow:hidden;border-radius:.6em;background:#222c3b}",
+            ".lp-cover{position:absolute;top:0;right:0;bottom:0;left:0;width:100%;height:100%;object-fit:cover}",
+            ".lp-hero:after{content:'';position:absolute;top:0;right:0;bottom:0;left:0;background:linear-gradient(0deg,rgba(0,0,0,.92),transparent 95%);pointer-events:none}",
+            ".lp-hero-content{position:absolute;top:0;right:0;bottom:0;left:0;z-index:1;padding:.7em;display:flex;flex-direction:column;justify-content:flex-end;gap:.4em}",
+            ".lp-title-logo{max-width:85%;height:3.1em;object-fit:contain;object-position:left center;align-self:flex-start}",
+            ".lp-name{font-size:1.2em;font-weight:600;line-height:1.15;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",
+            ".lp-continue{padding:.5em .6em;border:1px solid rgba(255,255,255,.65);border-radius:.6em;align-self:flex-start;background:rgba(0,0,0,.45);font-weight:600}",
+            ".lp-resume-detail{font-size:.73em;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",
+            ".lp-progress{height:.22em;background:rgba(255,255,255,.28);border-radius:.2em;overflow:hidden;min-height:3px}",
+            ".lp-progress i{display:block;height:100%;background:#fff}",
+            ".lp-scroll{overflow:auto;scrollbar-width:none;min-height:0;min-width:0;overscroll-behavior:contain}",
+            ".lp-scroll::-webkit-scrollbar{display:none}",
+            ".lp-tools{display:flex;flex-direction:column;gap:.4em;padding:.15em;flex-shrink:1}",
+            ".lamplay__control{padding:.6em .8em;background:rgba(0,0,0,.45);border-radius:.4em;white-space:nowrap;flex-shrink:0;font-size:.85em}",
+            ".lp-selected{box-shadow:inset 0 0 0 1px rgba(255,255,255,.65);background:rgba(255,255,255,.16)}",
+            ".lp-filters{display:flex;flex-direction:column;gap:.55em;flex-shrink:0;min-width:0}",
+            ".lp-strip{display:flex;gap:.4em;padding:.2em;white-space:nowrap}",
+            ".lp-caption{font-size:.75em;color:#d3d9e5;margin-bottom:.25em}",
+            ".lp-body-pane{flex:1;padding:.2em;box-sizing:border-box}",
+            ".lamplay__items{display:flex;flex-direction:column;gap:.55em}",
+            ".lamplay__item{padding:.65em;background:rgba(6,12,22,.72);border-radius:.45em;border:2px solid transparent;box-sizing:border-box;flex-shrink:0}",
+            ".lamplay__item-title{font-size:1em;font-weight:600;line-height:1.2;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}",
+            ".lamplay__item-detail{font-size:.73em;color:#d1d9e8;line-height:1.3;margin-top:.4em}",
+            ".lp-episode{display:flex;gap:.65em;padding:.3em;align-items:stretch;min-height:6.3em}",
+            ".lp-picture{color:#fff;position:relative;width:10em;min-width:10em;height:5.625em;background:#263449;overflow:hidden;border-radius:.3em}",
+            ".lp-picture img{width:100%;height:100%;object-fit:cover;position:absolute;top:0;right:0;bottom:0;left:0}",
+            ".lp-picture .lp-progress{position:absolute;bottom:.25em;left:.3em;right:.3em}",
+            ".lp-episode-number,.lp-runtime,.lp-quality{position:absolute;padding:.15em .25em;background:rgba(0,0,0,.7);border-radius:.2em;font-size:.65em}",
+            ".lp-episode-number{left:.3em;top:.3em}.lp-runtime{right:.3em;bottom:.8em}.lp-quality{right:.3em;top:.3em}.lp-quality:empty{display:none}",
+            ".lp-episode-info{padding:.4em .35em;min-width:0;flex:1}",
+            ".lp-watched{font-size:.7em;margin-top:.35em}",
+            ".lp-description{font-size:.75em;line-height:1.35;margin-top:.45em;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}",
+            ".lamplay[data-view=vertical] .lp-description{display:none}",
+            ".lp-film .lp-picture{width:3.6em;min-width:3.6em;aspect-ratio:auto;background:transparent}",
+            ".lp-film .lp-runtime{display:none}.lp-film .lp-episode{min-height:4.7em}",
+            ".lp-film .lp-picture .lp-progress{bottom:.4em}.lp-film .lp-quality{left:.15em;right:auto}",
+            ".lp-series[data-view=horizontal] .lp-panel,.lp-series[data-view=card] .lp-panel{flex-direction:column}",
+            ".lp-series[data-view=horizontal] .lp-side,.lp-series[data-view=horizontal] .lp-main,.lp-series[data-view=card] .lp-side,.lp-series[data-view=card] .lp-main{display:none}",
+            ".lp-series[data-view=horizontal] .lp-hero,.lp-series[data-view=card] .lp-hero{grid-column:1;grid-row:1}",
+            ".lp-series[data-view=horizontal] .lp-filters,.lp-series[data-view=card] .lp-filters{grid-column:2;grid-row:1;justify-content:space-between}",
+            ".lp-series[data-view=horizontal] .lp-tools,.lp-series[data-view=card] .lp-tools{flex-direction:row}",
+            ".lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{flex:1;min-height:0;overflow-y:hidden}",
+            ".lp-series[data-view=horizontal] .lamplay__items,.lp-series[data-view=card] .lamplay__items{flex-direction:row;height:100%;width:max-content}",
+            ".lp-series[data-view=horizontal] .lp-episode,.lp-series[data-view=card] .lp-episode{width:23vw;max-width:24em;min-width:12em;flex-direction:column;gap:0;height:100%;overflow:hidden}",
+            ".lp-series[data-view=horizontal] .lp-picture,.lp-series[data-view=card] .lp-picture{width:100%;min-width:0;flex-shrink:0;height:12.94vw;max-height:57%;}",
+            ".lp-series[data-view=horizontal] .lp-episode-info,.lp-series[data-view=card] .lp-episode-info{overflow:hidden}",
+            ".lamplay[data-view=card] .lp-hero{background:transparent}.lamplay[data-view=card] .lp-cover,.lamplay[data-view=card] .lp-hero:after{display:none}",
+            ".lamplay[data-view=card] .lp-hero-content{padding:.3em;justify-content:center}",
+            ".lamplay[data-view=results] .lp-filters{display:none}",
+            ".lamplay .selector.focus,.lamplay .selector:focus{outline:none;background:#fff;color:#111;border-color:#fff}",
+            ".lamplay .selector.focus .lamplay__item-detail{color:#344057}",
+            ".lamplay .lp-episode.focus .lp-progress i{background:#6aa7ff}",
+            ".lamplay__status{position:absolute;top:.5em;left:50%;transform:translateX(-50%);max-width:85%;padding:.5em .8em;border-radius:.4em;z-index:5;background:#17263c;box-shadow:0 2px 10px #0007;font-size:.85em}",
+            ".lamplay__status.lp-error{background:#582a30}.lp-retry{display:inline-block;padding:.35em;margin-left:.6em;text-decoration:underline}",
+            "@media(max-height:650px){.lp-panel{padding:.65em .9em;gap:.65em}.lp-hero{min-height:8em}.lp-description{-webkit-line-clamp:2}.lp-caption{font-size:.65em}.lamplay__control{padding:.45em .6em}.lp-strip-group{min-height:0}}",
+            "@media(max-width:700px){.lp-panel{padding:.5em;gap:.5em}.lp-picture{width:7em;min-width:7em}.lp-name{font-size:1em}.lamplay__control{font-size:.75em}.lp-hero{min-height:8em}.lp-episode-info{font-size:.85em}}"
+        ].join('\n')).appendTo('head');
         Lampa.Component.add(KEY, Screen);
         var buttonBindings = [];
         function updateButton(binding) {
@@ -1032,6 +1347,8 @@
                     if (!savedMarker.length) { savedMarker = $(root.document.createComment('lamplay-original-button-position')); existing.before(savedMarker); }
                     bindButton(existing, savedMarker, render);
                 }
+                var cachedStart = event.link && event.link.items && event.link.items[0];
+                if (cachedStart && flag(setting('button_first', true), true)) cachedStart.last = render.find('.view--lamplay-direct').first()[0] || existing[0];
                 updateButtons(); return;
             }
             var button = $('<div class="full-start__button selector view--lamplay">' + LOGO + '<span>LamPlay</span></div>');
@@ -1044,6 +1361,13 @@
             else render.find('.buttons--container, .full-start__buttons, .full-start-new__buttons').first().append(marker);
             marker.after(button);
             bindButton(button, marker, render);
+            var binding = buttonBindings[buttonBindings.length - 1];
+            var startComponent = event.link && event.link.items && event.link.items[0];
+            if (startComponent) {
+                var focusedButton = binding.direct || binding.button;
+                focusedButton.on('hover:focus hover:hover hover:touch', function () { startComponent.last = this; });
+                if (flag(setting('button_first', true), true)) startComponent.last = focusedButton[0];
+            }
         });
         Lampa.SettingsApi.addComponent({ component: KEY, name: NAME,
             icon: LOGO });
@@ -1060,13 +1384,15 @@
             childMenus.push(id);
             Lampa.SettingsApi.addComponent({ component: id, name: title,
                 icon: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M4 4h6l2 3h8v13H4z"/></svg>' });
-            var returnIndex = 0;
+            var returnIndex = 0, returnScroll = null;
             buttonParam(KEY, id + '_open', title + ' ›', function () {
-                Lampa.Settings.create(id, { onBack: function () { Lampa.Settings.create(KEY, { last_index: returnIndex }); } });
+                Lampa.Settings.create(id, { onBack: function () { Lampa.Settings.create(KEY, { last_index: returnIndex, lamplay_scroll: returnScroll }); } });
             }, '', function (item) {
-                item.on('hover:enter', function () { returnIndex = item.parent().find('.selector').index(item); });
-                // The settings component may have no .settings ancestor in older builds.
-                item.on('hover:focus', function () { returnIndex = item.parent().find('.selector').index(item); });
+                item.on('hover:enter', function () {
+                    returnIndex = item.parent().find('.selector').index(item);
+                    var scroll = item.closest('.scroll')[0];
+                    returnScroll = scroll && scroll.Scroll && scroll.Scroll.position ? scroll.Scroll.position() : null;
+                });
             });
         }
         param('source', 'select', 'Источник по умолчанию', 'kodik', { kodik: 'Kodik', rezka: 'HDrezka', libria: 'AniLibria' });
@@ -1076,7 +1402,7 @@
         param('prefer_http', 'trigger', 'Предпочитать видеопоток по HTTP', false, undefined,
             'Меняет протокол видеоссылок. Используйте при открытии самой Lampa по HTTP.');
         param('full_episode_title', 'trigger', 'Полный формат названия серии', true, undefined,
-            'Название произведения, сезон, серия, название эпизода и озвучка.');
+            'Сезон, номер и название эпизода в плеере. Название произведения отображается в шапке.');
         param('remember_source', 'trigger', 'Запоминать источник для каждого произведения', true);
         buttonParam(KEY, 'clear_source_history', 'Очистить историю источников', function () {
             var history = object(setting('source_history', {})), count = Object.keys(history).length;
@@ -1088,47 +1414,46 @@
         var libriaMenu = KEY + '_libria_settings', extraMenu = KEY + '_extra_settings';
         submenu(rezkaMenu, 'HDrezka'); submenu(kodikMenu, 'Kodik'); submenu(libriaMenu, 'AniLibria'); submenu(extraMenu, 'Дополнительно');
         var authIo = new Transport(Lampa, setting), authSession = new RezkaSession(authIo, setting, save, Lampa);
-        var passwordDraft = '', passwordOrigin = '', authBusy = false, authStatusNode = null, passwordStatusNode = null;
+        var passwordDraft = String(setting('rezka_password', '') || ''), authBusy = false, authStatusNode = null, passwordStatusNode = null;
         function rezkaHost() { return hostSetting(setting('rezka_host', ''), 'https://rezka.ag'); }
         function updateAuthStatus(message) {
             if (authStatusNode) authStatusNode.text(message || authSession.status(rezkaHost()));
-            if (passwordStatusNode) passwordStatusNode.text(passwordDraft && passwordOrigin === rezkaHost() ? 'Пароль введён до попытки входа' : 'Пароль не задан');
+            if (passwordStatusNode) passwordStatusNode.text(passwordDraft || 'Не задано');
         }
         function passwordInput(callback) {
-            var host = rezkaHost();
-            Lampa.Input.edit({ title: 'Пароль HDrezka', value: passwordOrigin === host ? passwordDraft : '', free: true,
+            Lampa.Input.edit({ title: 'Пароль HDrezka', value: passwordDraft, free: true,
                 nosave: true, password: false }, function (value) {
-                passwordDraft = String(value || ''); passwordOrigin = host; updateAuthStatus();
+                passwordDraft = String(value || ''); save('rezka_password', passwordDraft); updateAuthStatus();
                 Lampa.Controller.toggle('settings_component');
                 if (callback && passwordDraft) callback();
             });
         }
         param('rezka_host', 'input', 'Зеркало', 'https://rezka.ag', '', 'Вход и запросы выполняются непосредственно на этом сайте.', rezkaMenu, function () {
-            authIo.clear(); authBusy = false; passwordDraft = ''; passwordOrigin = ''; updateAuthStatus();
+            authIo.clear(); authBusy = false; updateAuthStatus();
         });
         param('rezka_login', 'input', 'Логин или почта', '', '', '', rezkaMenu);
         buttonParam(rezkaMenu, 'rezka_password', 'Пароль', function () { passwordInput(); }, '', function (item) {
-            passwordStatusNode = $('<div class="settings-param__descr"></div>'); item.append(passwordStatusNode); updateAuthStatus();
+            passwordStatusNode = $('<div class="settings-param__value"></div>'); item.append(passwordStatusNode); updateAuthStatus();
         });
         buttonParam(rezkaMenu, 'rezka_signin', 'Войти', function attemptLogin() {
             if (authBusy) return;
             var host = rezkaHost(), login = String(setting('rezka_login', '') || '').trim();
             if (!login) { Lampa.Noty.show('Сначала укажите логин или почту HDrezka.'); return; }
-            if (!passwordDraft || passwordOrigin !== host) { passwordInput(attemptLogin); return; }
-            var password = passwordDraft; passwordDraft = ''; passwordOrigin = '';
+            if (!passwordDraft) { passwordInput(attemptLogin); return; }
+            var password = passwordDraft;
             authBusy = true; updateAuthStatus('Выполняется вход…');
             authSession.login(host, login, password, function () {
                 authBusy = false; updateAuthStatus(); Lampa.Noty.show('HDrezka: вход подтверждён.');
             }, function (error) {
-                authBusy = false; updateAuthStatus(); Lampa.Noty.show(safeError(error));
+                authBusy = false; updateAuthStatus(safeError(error)); Lampa.Noty.show(safeError(error));
             });
         });
         buttonParam(rezkaMenu, 'rezka_signout', 'Выйти', function () {
             if (authBusy) return;
-            authBusy = true; passwordDraft = ''; passwordOrigin = ''; updateAuthStatus('Выполняется выход…');
+            authBusy = true; updateAuthStatus('Выполняется выход…');
             authSession.logout(rezkaHost(), function () {
                 authBusy = false; updateAuthStatus(); Lampa.Noty.show('HDrezka: выход подтверждён.');
-            }, function (error) { authBusy = false; updateAuthStatus(); Lampa.Noty.show(safeError(error)); });
+            }, function (error) { authBusy = false; updateAuthStatus(safeError(error)); Lampa.Noty.show(safeError(error)); });
         });
         buttonParam(rezkaMenu, 'rezka_auth_status', 'Состояние входа', function () { updateAuthStatus(); }, '', function (item) {
             authStatusNode = $('<div class="settings-param__descr"></div>'); item.append(authStatusNode); updateAuthStatus();
@@ -1164,6 +1489,23 @@
         }
         Lampa.Settings.listener.follow('open', function (event) {
             if (settingsObserver) { settingsObserver.disconnect(); settingsObserver = null; }
+            if (event.name === KEY && event.params && event.params.last_index !== undefined) {
+                var expected = event.body;
+                var restore = function () {
+                    if (!expected[0] || !root.document.documentElement.contains(expected[0])) return;
+                    var target = expected.find('.selector').eq(event.params.last_index);
+                    var element = expected.is('.scroll') ? expected[0] : expected.closest('.scroll')[0];
+                    var scroll = element && element.Scroll;
+                    if (scroll && event.params.lamplay_scroll !== null && event.params.lamplay_scroll !== undefined && scroll.position && scroll.shift) {
+                        scroll.shift(scroll.position() - event.params.lamplay_scroll);
+                    } else if (scroll && target.length) {
+                        if (scroll.immediate) scroll.immediate(target, true); else scroll.update(target, true);
+                    } else if (target.length && element) keepVisible(element, target[0]);
+                };
+                // The settings controller focuses before layout/height is applied.
+                // Restore after that layout, rather than merely restoring the focus index.
+                setTimeout(function () { if (root.requestAnimationFrame) root.requestAnimationFrame(restore); else restore(); }, 0);
+            }
             if (event.name === 'main') {
                 arrangeSettings(event.body);
                 var item = event.body.find('[data-component="' + KEY + '"]').first();
