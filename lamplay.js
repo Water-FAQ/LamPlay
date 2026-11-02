@@ -1,14 +1,14 @@
-/* LamPlay by WaterFAQ — 0.3.0 (experimental)
+/* LamPlay by WaterFAQ — 0.4.0 (experimental)
  * Independent Lampa plugin. Direct connections only; no proxy or remote code execution.
  * Providers: Kodik, HDrezka, AniLibria / AniLiberty.
  */
 (function (root) {
     'use strict';
-    var VERSION = '0.3.0';
+    var VERSION = '0.4.0';
     var KEY = 'lamplay';
     var NAME = 'LamPlay';
-    // L-shaped frame and play wedge; currentColor follows the host focus theme.
-    var LOGO = '<svg class="lamplay-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" aria-hidden="true"><path fill="currentColor" d="M4 4h6v20h18v4H4zM15 4l14 9-14 9z"/></svg>';
+    // Selected L + Play mark: matching stroke widths and triangle inside L bounds.
+    var LOGO = '<svg class="lamplay-logo" xmlns="http://www.w3.org/2000/svg" viewBox="5 5 54 54" aria-hidden="true"><path fill="currentColor" d="M13 12h7v34h32v7H13zM28 12l24 16-24 16z"/></svg>';
 
     function own(obj, key) { return Object.prototype.hasOwnProperty.call(obj, key); }
     function list(value) { return Array.isArray(value) ? value : []; }
@@ -703,11 +703,16 @@
             [name,year?name+' '+year:''].forEach(function (q) {if (q && all.indexOf(q)<0) all.push(q);});
         });return all;
     }
+    function titleAliases(value) {
+        var parts=String(value || '').split(/\s*[/|]\s*/);parts.unshift(String(value || ''));
+        return parts.map(normal).filter(Boolean);
+    }
+    function sameTitle(a,b) {var aa=titleAliases(a),bb=titleAliases(b);return aa.some(function (name) {return bb.indexOf(name)>=0;});}
     function exactResult(items,movie,query) {
         if (items.length===1 && items[0].widget) return items[0];
         var names=[query];if (searchNames(movie).indexOf(query)>=0) names=names.concat([movie.title,movie.name,movie.original_title,movie.original_name]);
         names=names.map(normal).filter(Boolean);var year=String(movie.release_date||movie.first_air_date||'').slice(0,4);
-        var exact=items.filter(function (r) {return [r.title,r.original].some(function (t) {return t && names.indexOf(normal(t))>=0;});});
+        var exact=items.filter(function (r) {return [r.title,r.original].some(function (t) {return t && titleAliases(t).some(function (alias) {return names.indexOf(alias)>=0;});});});
         var sameYear=exact.filter(function (r) {return year && String(r.year)===year;});
         if (sameYear.length===1) return sameYear[0];
         if (exact.length===1 && (!year || !exact[0].year || String(exact[0].year)===year)) return exact[0];
@@ -766,9 +771,14 @@
             save('resume',updated);
         }
         var currentPlayback = null, lastProgressSave = 0, activeScreen = null;
-        function paintNextLabel() {
+        function paintNextLabel(event) {
             if (!Lampa.PlayerPanel || !Lampa.PlayerPanel.render || !currentPlayback) return;
-            Lampa.PlayerPanel.render().find('.player-next__title').text(currentPlayback._lamplay.series ? 'Следующая серия' : 'Следующая озвучка');
+            var rendered=Lampa.PlayerPanel.render();
+            rendered.find('.player-next__title').text(currentPlayback._lamplay.series ? 'Следующая серия' : 'Следующая озвучка');
+            var list=event && event.playlist || Lampa.PlayerPlaylist && Lampa.PlayerPlaylist.get && Lampa.PlayerPlaylist.get();
+            var next=event && event.playlist ? list[event.position+1] : null;
+            if (!next && list) for (var i=0;i<list.length-1;i++) if (list[i]===currentPlayback || list[i].url===currentPlayback.url) {next=list[i+1];break;}
+            if (next && next._lpNextTitle) rendered.find('.player-next__episode-title').text(next._lpNextTitle);
         }
         if (Lampa.Player && Lampa.Player.listener) {
             Lampa.Player.listener.follow('start', function (data) {
@@ -820,7 +830,7 @@
             var lastEpisodeKey = null;
             var busy = false, destroyed = false, last = null, generation = 0, reverse = false, pendingResume = null;
             var cache = {}, probeQueue = [], probing = 0, observed = null, metadata = { details: movie, seasons: {}, id: null, request: 0, signature: '' };
-            var type = movie.media_type === 'tv' || movie.name || movie.first_air_date ? 'tv' : 'movie';
+            var type = /^(tv|movie)$/.test(movie.media_type) ? movie.media_type : movie.name || movie.first_air_date ? 'tv' : 'movie';
             var html = $('<div class="lamplay"></div>'), backdrop = $('<div class="lp-backdrop"></div>');
             var top = $('<div class="lp-top"></div>');
             var panel = $('<div class="lp-panel"></div>'), side = $('<aside class="lp-side"></aside>');
@@ -828,7 +838,7 @@
             var filters = $('<div class="lp-filters"></div>'), tools = $('<div class="lamplay__controls lp-scroll lp-tools"></div>');
             var bodyPane = $('<div class="lp-scroll lp-body-pane"></div>'), body = $('<div class="lamplay__items"></div>');
             var status = $('<div class="lamplay__status" role="status"></div>');
-            var statusText = $('<span></span>'), retryAction = null;
+            var statusText = $('<span></span>'), retryAction = null, lastBackground = '';
             status.append(statusText);side.append(hero);main.append(filters,bodyPane.append(body));panel.append(side,main);
             html.append(backdrop,status,panel);
             function inActivity() { var a = Lampa.Activity.active(); return !destroyed && a && a.activity === self.activity; }
@@ -863,7 +873,7 @@
             function setImage(img,url) {
                 if (url) img.attr('src',url).on('error',function () {
                     if ($(this).hasClass('lp-title-logo')) $(this).replaceWith($('<div class="lp-name"></div>').text(metadata.details.title || metadata.details.name || initialQuery));
-                    else $(this).remove();
+                    else { if ($(this).hasClass('lp-cover')) hero.removeClass('lp-has-cover');$(this).remove(); }
                 });
                 return img;
             }
@@ -898,8 +908,10 @@
                 } else {
                     top.detach();side.append(hero,tools);main.append(filters,bodyPane);panel.append(side,main);
                 }
-                var bg = imageURL(metadata.details.backdrop_path,'original');
-                backdrop.empty();if (bg) backdrop.append(setImage($('<img alt="">'),bg));
+                var bg = imageURL(metadata.details.backdrop_path || metadata.details.poster_path,'original');
+                if (bg && bg!==lastBackground && Lampa.Background && Lampa.Background.change) {Lampa.Background.change(bg);lastBackground=bg;}
+                backdrop.empty();
+                if (v==='card' && bg) backdrop.append(setImage($('<img alt="">'),bg));
             }
             function searchMenu() {
                 var options = searchNames(movie).map(function (q) {return {title:q,value:q};});
@@ -930,13 +942,11 @@
                 if (release && series()) control('Порядок: '+(reverse?'Обратный':'Стандартный'),function () {reverse=!reverse;renderEpisodes();});
                 if (release) control('Вид: '+({horizontal:'Горизонтальный',vertical:'Вертикальный',card:'Карточка'}[view()]),function () {
                     var names=series()?['horizontal','vertical','card']:['vertical','card'];
-                    select('Вид',names.map(function (v) {return {title:{horizontal:'Горизонтальный',vertical:'Вертикальный',card:'Карточка'}[v],value:v};}),view(),function (v) {
-                        var selected=lastEpisodeKey;
-                        save(series()?'view_series':'view_movie',v);renderEpisodes(selected);
-                    });
+                    var next=names[(names.indexOf(view())+1)%names.length];
+                    save(series()?'view_series':'view_movie',next);renderEpisodes(lastEpisodeKey);
                 });
                 control('Сбросить фильтр',function () {query=initialQuery;pendingResume=null;search();});
-                control('⌕ '+query,searchMenu).attr('aria-label','Поиск');
+                control('Поиск: '+query,searchMenu).attr('aria-label','Поиск');
                 if (release) control('К результатам',backToResults);
                 if (busy) control('Отменить',cancel);
                 layout();
@@ -1040,7 +1050,8 @@
             function renderHero() {
                 hero.empty();var d=metadata.details, resume=savedResume();
                 var image=imageURL(d.backdrop_path || d.poster_path,'w780');
-                if (image) hero.append(setImage($('<img class="lp-cover" alt="">'),image));
+                hero.removeClass('lp-has-cover');
+                if (image) hero.append(setImage($('<img class="lp-cover" alt="">').on('load',function () {hero.addClass('lp-has-cover');}),image));
                 var content=$('<div class="lp-hero-content"></div>');
                 if (metadata.logo) content.append(setImage($('<img class="lp-title-logo" alt="">').attr('alt',initialQuery),metadata.logo));
                 else content.append($('<div class="lp-name"></div>').text(d.title||d.name||initialQuery));
@@ -1130,7 +1141,7 @@
                     if (handler) handler(percent,time,duration);
                     state.percent=percent;state.time=time;state.duration=duration;state.updated=Date.now();record(state);
                 };
-                return {title:series()?(flag(setting('full_episode_title',true),true)?'[S'+ep.season+':E'+ep.number+'] '+episodeName(ep):'Серия '+ep.number):v.title,
+                return {_lpNextTitle:series()?episodeName(ep):v.title,title:series()?(flag(setting('full_episode_title',true),true)?'[S'+ep.season+':E'+ep.number+'] '+episodeName(ep):'Серия '+ep.number):v.title,
                     thumbnail:series()?thumbnail(ep):undefined,card:movie,timeline:view,
                     season:series()?+ep.season:undefined,episode:series()?+ep.number:undefined,
                     _lamplay:state,_lpEpisode:ep,subtitles:false};
@@ -1166,7 +1177,7 @@
             }
             function loadMetadata(target) {
                 if (!Lampa.TMDB) return;
-                var sameCard = !target || [movie.title,movie.name,movie.original_title,movie.original_name].some(function (name) {return name && normal(name)===normal(target.title);});
+                var sameCard = !target || [movie.title,movie.name,movie.original_title,movie.original_name].some(function (name) {return name && sameTitle(name,target.title);});
                 var sourceType = target && release ? (series()?'tv':'movie') : type;
                 var cardYear=String(movie.release_date||movie.first_air_date||'').slice(0,4);
                 if (target && target.year && cardYear && String(target.year)!==cardYear || sourceType!==type) sameCard=false;
@@ -1223,52 +1234,53 @@
 
         $('<style id="lamplay-style"></style>').text([
             ".lamplay-logo{width:1.6em;height:1.6em;flex-shrink:0;fill:currentColor}",
+            "body.glass--style .settings-folder[data-component=lamplay] .settings-folder__icon{-webkit-filter:none!important;filter:none!important}",
             ".full-start-new__buttons .view--lamplay-direct{width:auto!important;max-width:none!important;flex-shrink:0;color:#fff}",
             ".full-start-new__buttons .view--lamplay-direct span{display:block!important;max-width:none!important;width:auto!important;opacity:1!important;visibility:visible!important;margin-left:.5em}",
             ".full-start-new__buttons .view--lamplay-direct.focus{color:#111;background:#fff}",
-            ".lamplay{height:100%;min-height:0;position:relative;overflow:hidden;background:#151b27;color:#fff;isolation:isolate}",
-            ".lp-backdrop{position:absolute;top:0;right:0;bottom:0;left:0;z-index:-1;pointer-events:none;background:#151b27}",
-            ".lp-backdrop img{width:100%;height:100%;object-fit:cover;opacity:.2}",
-            ".lamplay[data-view=card] .lp-backdrop img{opacity:.65}",
-            ".lp-backdrop:after{content:'';position:absolute;top:0;right:0;bottom:0;left:0;background:linear-gradient(90deg,rgba(10,15,24,.8),rgba(10,15,24,.25)),linear-gradient(0deg,rgba(10,15,24,.95),transparent 75%)}",
+            ".lamplay{height:100%;min-height:0;position:relative;overflow:hidden;background:transparent;color:#fff;isolation:isolate;font-size:1.2em}",
+            ".lp-backdrop{position:absolute;top:0;right:0;bottom:0;left:0;z-index:-1;pointer-events:none;background:transparent}",
+            ".lp-backdrop img{width:100%;height:100%;object-fit:cover;opacity:1}",
+            ".lamplay[data-view=card] .lp-backdrop img{opacity:1}.lp-backdrop:empty{display:none}",
+            ".lp-backdrop:after{content:'';position:absolute;top:0;right:0;bottom:0;left:0;background:linear-gradient(90deg,rgba(0,0,0,.55),rgba(0,0,0,.12)),linear-gradient(0deg,rgba(0,0,0,.5),transparent 75%)}",
             ".lp-panel{height:100%;box-sizing:border-box;padding:1em 1.3em;display:flex;gap:1em;min-height:0}",
             ".lp-side,.lp-main{min-width:0;min-height:0;display:flex;flex-direction:column;gap:.65em}",
             ".lp-side{width:30%;flex-shrink:0}.lp-main{overflow:hidden;flex:1}.lp-top{display:flex;gap:1em;min-height:0;flex-shrink:0}.lp-top>.lp-hero{width:32%}.lp-top>.lp-filters{flex:1;min-width:0}",
-            ".lp-hero{height:26vh;min-height:9em;max-height:17em;flex-shrink:0;position:relative;overflow:hidden;border-radius:.6em;background:#222c3b}",
+            ".lp-hero{height:26vh;min-height:9em;max-height:17em;flex-shrink:0;position:relative;overflow:hidden;border-radius:.6em;background:transparent}",
             ".lp-cover{position:absolute;top:0;right:0;bottom:0;left:0;width:100%;height:100%;object-fit:cover}",
-            ".lp-hero:after{content:'';position:absolute;top:0;right:0;bottom:0;left:0;background:linear-gradient(0deg,rgba(0,0,0,.92),transparent 95%);pointer-events:none}",
+            ".lp-hero.lp-has-cover:after{content:'';position:absolute;top:0;right:0;bottom:0;left:0;background:linear-gradient(0deg,rgba(0,0,0,.92),transparent 95%);pointer-events:none}",
             ".lp-hero-content{position:absolute;top:0;right:0;bottom:0;left:0;z-index:1;padding:.7em;display:flex;flex-direction:column;justify-content:flex-end;gap:.4em}",
             ".lp-title-logo{max-width:85%;height:3.1em;object-fit:contain;object-position:left center;align-self:flex-start}",
             ".lp-name{font-size:1.2em;font-weight:600;line-height:1.15;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",
             ".lp-continue{padding:.5em .6em;border:1px solid rgba(255,255,255,.65);border-radius:.6em;align-self:flex-start;background:rgba(0,0,0,.45);font-weight:600}",
-            ".lp-resume-detail{font-size:.73em;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",
+            ".lp-resume-detail{font-size:.86em;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",
             ".lp-progress{height:.22em;background:rgba(255,255,255,.28);border-radius:.2em;overflow:hidden;min-height:3px}",
             ".lp-progress i{display:block;height:100%;background:#fff}",
             ".lp-scroll{overflow:auto;scrollbar-width:none;min-height:0;min-width:0;overscroll-behavior:contain}",
             ".lp-scroll::-webkit-scrollbar{display:none}",
             ".lp-tools{display:flex;flex-direction:column;gap:.4em;padding:.15em;flex-shrink:1}",
-            ".lamplay__control{padding:.6em .8em;background:rgba(0,0,0,.45);border-radius:.4em;white-space:nowrap;flex-shrink:0;font-size:.85em}",
+            ".lamplay__control{padding:.6em .8em;background:rgba(0,0,0,.45);border-radius:.4em;white-space:nowrap;flex-shrink:0;font-size:1em}",
             ".lp-selected{box-shadow:inset 0 0 0 1px rgba(255,255,255,.65);background:rgba(255,255,255,.16)}",
             ".lp-filters{display:flex;flex-direction:column;gap:.55em;flex-shrink:0;min-width:0}",
             ".lp-strip{display:flex;gap:.4em;padding:.2em;white-space:nowrap}",
-            ".lp-caption{font-size:.75em;color:#d3d9e5;margin-bottom:.25em}",
+            ".lp-caption{font-size:.9em;color:rgba(255,255,255,.8);margin-bottom:.25em}",
             ".lp-body-pane{flex:1;padding:.2em;box-sizing:border-box}",
             ".lamplay__items{display:flex;flex-direction:column;gap:.55em}",
-            ".lamplay__item{padding:.65em;background:rgba(6,12,22,.72);border-radius:.45em;border:2px solid transparent;box-sizing:border-box;flex-shrink:0}",
-            ".lamplay__item-title{font-size:1em;font-weight:600;line-height:1.2;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}",
-            ".lamplay__item-detail{font-size:.73em;color:#d1d9e8;line-height:1.3;margin-top:.4em}",
+            ".lamplay__item{padding:.65em;background:rgba(0,0,0,.35);border-radius:.45em;border:2px solid transparent;box-sizing:border-box;flex-shrink:0}",
+            ".lamplay__item-title{font-size:1.12em;font-weight:600;line-height:1.2;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}",
+            ".lamplay__item-detail{font-size:.86em;color:rgba(255,255,255,.8);line-height:1.3;margin-top:.4em}",
             ".lp-episode{display:flex;gap:.65em;padding:.3em;align-items:stretch;min-height:6.3em}",
-            ".lp-picture{color:#fff;position:relative;width:10em;min-width:10em;height:5.625em;background:#263449;overflow:hidden;border-radius:.3em}",
+            ".lp-picture{color:#fff;position:relative;width:10em;min-width:10em;height:5.625em;background:transparent;overflow:hidden;border-radius:.3em}",
             ".lp-picture img{width:100%;height:100%;object-fit:cover;position:absolute;top:0;right:0;bottom:0;left:0}",
             ".lp-picture .lp-progress{position:absolute;bottom:.25em;left:.3em;right:.3em}",
-            ".lp-episode-number,.lp-runtime,.lp-quality{position:absolute;padding:.15em .25em;background:rgba(0,0,0,.7);border-radius:.2em;font-size:.65em}",
+            ".lp-episode-number,.lp-runtime,.lp-quality{position:absolute;padding:.15em .25em;background:rgba(0,0,0,.7);border-radius:.2em;font-size:.78em}",
             ".lp-episode-number{left:.3em;top:.3em}.lp-runtime{right:.3em;bottom:.8em}.lp-quality{right:.3em;top:.3em}.lp-quality:empty{display:none}",
             ".lp-episode-info{padding:.4em .35em;min-width:0;flex:1}",
-            ".lp-watched{font-size:.7em;margin-top:.35em}",
-            ".lp-description{font-size:.75em;line-height:1.35;margin-top:.45em;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}",
-            ".lamplay[data-view=vertical] .lp-description{display:none}",
-            ".lp-film .lp-picture{width:3.6em;min-width:3.6em;aspect-ratio:auto;background:transparent}",
-            ".lp-film .lp-runtime{display:none}.lp-film .lp-episode{min-height:4.7em}",
+            ".lp-watched{font-size:.86em;margin-top:.35em}",
+            ".lp-description{font-size:.9em;line-height:1.35;margin-top:.45em;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}",
+            ".lp-series[data-view=vertical] .lp-description{display:none}",
+            ".lp-film .lp-picture{width:3.6em;min-width:3.6em;height:auto;background:transparent}",
+            ".lp-film .lp-runtime{display:none}.lp-film .lp-episode{min-height:4.1em}",
             ".lp-film .lp-picture .lp-progress{bottom:.4em}.lp-film .lp-quality{left:.15em;right:auto}",
             ".lp-series[data-view=horizontal] .lp-panel,.lp-series[data-view=card] .lp-panel{flex-direction:column}",
             ".lp-series[data-view=horizontal] .lp-side,.lp-series[data-view=horizontal] .lp-main,.lp-series[data-view=card] .lp-side,.lp-series[data-view=card] .lp-main{display:none}",
@@ -1276,30 +1288,79 @@
             ".lp-series[data-view=horizontal] .lp-filters,.lp-series[data-view=card] .lp-filters{grid-column:2;grid-row:1;justify-content:space-between}",
             ".lp-series[data-view=horizontal] .lp-tools,.lp-series[data-view=card] .lp-tools{flex-direction:row}",
             ".lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{flex:1;min-height:0;overflow-y:hidden}",
-            ".lp-series[data-view=horizontal] .lamplay__items,.lp-series[data-view=card] .lamplay__items{flex-direction:row;height:100%;width:max-content}",
-            ".lp-series[data-view=horizontal] .lp-episode,.lp-series[data-view=card] .lp-episode{width:23vw;max-width:24em;min-width:12em;flex-direction:column;gap:0;height:100%;overflow:hidden}",
-            ".lp-series[data-view=horizontal] .lp-picture,.lp-series[data-view=card] .lp-picture{width:100%;min-width:0;flex-shrink:0;height:12.94vw;max-height:57%;}",
+            ".lp-series[data-view=horizontal] .lamplay__items,.lp-series[data-view=card] .lamplay__items{flex-direction:row;align-items:flex-start;width:max-content;min-height:0}",
+            ".lp-series[data-view=horizontal] .lp-episode,.lp-series[data-view=card] .lp-episode{width:23vw;max-width:24em;min-width:12em;flex-direction:column;gap:0;height:auto;overflow:hidden;background:transparent}",
+            ".lp-series[data-view=horizontal] .lp-picture,.lp-series[data-view=card] .lp-picture{width:100%;min-width:0;flex-shrink:0;height:12.94vw;}",
             ".lp-series[data-view=horizontal] .lp-episode-info,.lp-series[data-view=card] .lp-episode-info{overflow:hidden}",
-            ".lamplay[data-view=card] .lp-hero{background:transparent}.lamplay[data-view=card] .lp-cover,.lamplay[data-view=card] .lp-hero:after{display:none}",
+            ".lamplay[data-view=card] .lp-hero{background:transparent}.lamplay[data-view=card] .lp-cover,.lamplay[data-view=card] .lp-hero.lp-has-cover:after{display:none}",
             ".lamplay[data-view=card] .lp-hero-content{padding:.3em;justify-content:center}",
             ".lamplay[data-view=results] .lp-filters{display:none}",
             ".lamplay .selector.focus,.lamplay .selector:focus{outline:none;background:#fff;color:#111;border-color:#fff}",
-            ".lamplay .selector.focus .lamplay__item-detail{color:#344057}",
-            ".lamplay .lp-episode.focus .lp-progress i{background:#6aa7ff}",
-            ".lamplay__status{position:absolute;top:.5em;left:50%;transform:translateX(-50%);max-width:85%;padding:.5em .8em;border-radius:.4em;z-index:5;background:#17263c;box-shadow:0 2px 10px #0007;font-size:.85em}",
+            ".lamplay .selector.focus .lamplay__item-detail{color:#444}",
+            ".lamplay .lp-episode.focus .lp-progress i{background:#999}",
+            ".lamplay__status{position:absolute;top:.5em;left:50%;transform:translateX(-50%);max-width:85%;padding:.5em .8em;border-radius:.4em;z-index:5;background:#303030;box-shadow:0 2px 10px #0007;font-size:1em}",
             ".lamplay__status.lp-error{background:#582a30}.lp-retry{display:inline-block;padding:.35em;margin-left:.6em;text-decoration:underline}",
-            "@media(max-height:650px){.lp-panel{padding:.65em .9em;gap:.65em}.lp-hero{min-height:8em}.lp-description{-webkit-line-clamp:2}.lp-caption{font-size:.65em}.lamplay__control{padding:.45em .6em}.lp-strip-group{min-height:0}}",
-            "@media(max-width:700px){.lp-panel{padding:.5em;gap:.5em}.lp-picture{width:7em;min-width:7em}.lp-name{font-size:1em}.lamplay__control{font-size:.75em}.lp-hero{min-height:8em}.lp-episode-info{font-size:.85em}}"
+            "@media(max-height:650px){.lp-panel{padding:.65em .9em;gap:.65em}.lp-hero{min-height:8em}.lp-description{-webkit-line-clamp:2}.lp-caption{font-size:.78em}.lamplay__control{padding:.45em .6em}.lp-strip-group{min-height:0}}",
+            "@media(max-width:700px){.lp-panel{padding:.5em;gap:.5em}.lp-picture{width:7em;min-width:7em}.lp-name{font-size:1em}.lamplay__control{font-size:.9em}.lp-hero{min-height:8em}.lp-episode-info{font-size:1em}}",
+            ".lp-series[data-view=horizontal] .lp-episode-info,.lp-series[data-view=card] .lp-episode-info{flex:none}",
+            ".lp-series[data-view=horizontal] .lp-episode.focus,.lp-series[data-view=card] .lp-episode.focus{background:transparent;color:#fff;border-color:transparent}",
+            ".lp-series[data-view=horizontal] .lp-episode.focus .lp-picture,.lp-series[data-view=card] .lp-episode.focus .lp-picture{box-shadow:0 0 0 2px #fff}",
+            ".lp-series[data-view=horizontal] .lp-episode.focus .lamplay__item-detail,.lp-series[data-view=card] .lp-episode.focus .lamplay__item-detail{color:rgba(255,255,255,.8)}",
+            ".lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{overflow-y:auto}",
+            ".lamplay-card-logo{display:block;max-width:100%;max-height:5.5em;object-fit:contain;object-position:left center}"
         ].join('\n')).appendTo('head');
         Lampa.Component.add(KEY, Screen);
         var buttonBindings = [];
+        // CSS order wins over other plugins' prepends without a MutationObserver
+        // reorder loop. The initial-focus guard ends on the first real user input.
+        function focusPriority(binding) {
+            var a=Lampa.Activity.active(),visible=a && a.activity && a.activity.render && a.activity.render();
+            visible=visible && (visible[0] || visible);
+            return flag(setting('button_first',true),true) && binding.focusUntil>Date.now() && binding.direct &&
+                root.document.documentElement.contains(binding.direct[0]) && (!visible || visible.contains(binding.direct[0]));
+        }
+        function initialFocus(binding) {
+            if (!focusPriority(binding)) return;
+            var enabled=Lampa.Controller.enabled && Lampa.Controller.enabled();
+            if (enabled && enabled.name!=='content') return;
+            if (binding.startComponent) binding.startComponent.last=binding.direct[0];
+            if (!binding.direct.hasClass('focus')) Lampa.Controller.collectionFocus(binding.direct,binding.render);
+        }
+        function armPriority(binding,event) {
+            binding.render=event.object.activity.render();
+            binding.startComponent=event.link && event.link.items && event.link.items[0];
+            binding.focusUntil=Date.now()+1800;
+            if (binding.startComponent && flag(setting('button_first',true),true)) binding.startComponent.last=(binding.direct || binding.button)[0];
+            if (binding.direct) binding.direct.off('.lamplayPriority').on('hover:focus.lamplayPriority hover:touch.lamplayPriority',function () {
+                if (binding.startComponent) binding.startComponent.last=this;
+            });
+            setTimeout(function () {initialFocus(binding);},0);
+        }
+        function userNavigated() {buttonBindings.forEach(function (b) {b.focusUntil=0;});}
+        ['keydown','pointerdown','mousedown','touchstart'].forEach(function (name) {root.document.addEventListener(name,userNavigated,true);});
+        var originalCollectionFocus=Lampa.Controller.collectionFocus;
+        Lampa.Controller.collectionFocus=function (target,context) {
+            var container=context && (context[0] || context);
+            for (var i=buttonBindings.length-1;i>=0;i--) {
+                var binding=buttonBindings[i];
+                if (focusPriority(binding) && container && container.contains && container.contains(binding.direct[0])) {
+                    target=binding.direct;
+                    if (binding.startComponent) binding.startComponent.last=binding.direct[0];
+                    break;
+                }
+            }
+            var args=Array.prototype.slice.call(arguments);args[0]=target;
+            return originalCollectionFocus.apply(this,args);
+        };
+
         function updateButton(binding) {
             var parent = binding.button.parent();
             if (!parent.length) return;
             if (binding.direct && binding.direct.parent().length && flag(setting('button_first', true), true)) {
                 var directParent = binding.direct.parent();
-                if (directParent.children('.full-start__button').first()[0] !== binding.direct[0]) directParent.prepend(binding.direct);
+                binding.direct.css('order','-2147483647');
             }
+            if (binding.direct && !flag(setting('button_first',true),true)) binding.direct.css('order','');
             if (flag(setting('button_first', true), true)) {
                 var first = parent.children('.full-start__button, .selector').first();
                 if (first.length && first[0] !== binding.button[0]) first.before(binding.button);
@@ -1311,7 +1372,7 @@
             buttonBindings.forEach(updateButton);
         }
         function bindButton(button, marker, render) {
-            var binding = { button: button, marker: marker };
+            var binding = { button: button, marker: marker, render: render, focusUntil: 0 };
             // Modern Lampa groups source buttons in a hidden container. Keep that source
             // and create a separate shortcut in the visible action row.
             var actions = render.find('.full-start-new__buttons').first();
@@ -1324,9 +1385,12 @@
                 }
             }
             if (root.MutationObserver && button.parent().length) {
-                binding.observer = new root.MutationObserver(function () { updateButton(binding); });
+                binding.observer = new root.MutationObserver(function () {
+                    updateButton(binding);
+                    if (focusPriority(binding) && !binding.focusTimer) binding.focusTimer=setTimeout(function () {binding.focusTimer=null;initialFocus(binding);},16);
+                });
                 binding.observer.observe(button.parent()[0], { childList: true });
-                if (binding.direct) binding.observer.observe(actions[0], { childList: true });
+                if (binding.direct) binding.observer.observe(actions[0], { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
             }
             buttonBindings.push(binding); updateButton(binding);
         }
@@ -1347,8 +1411,8 @@
                     if (!savedMarker.length) { savedMarker = $(root.document.createComment('lamplay-original-button-position')); existing.before(savedMarker); }
                     bindButton(existing, savedMarker, render);
                 }
-                var cachedStart = event.link && event.link.items && event.link.items[0];
-                if (cachedStart && flag(setting('button_first', true), true)) cachedStart.last = render.find('.view--lamplay-direct').first()[0] || existing[0];
+                var cachedBinding=buttonBindings.filter(function (b) {return b.button[0]===existing[0];})[0];
+                if (cachedBinding) armPriority(cachedBinding,event);
                 updateButtons(); return;
             }
             var button = $('<div class="full-start__button selector view--lamplay">' + LOGO + '<span>LamPlay</span></div>');
@@ -1362,15 +1426,552 @@
             marker.after(button);
             bindButton(button, marker, render);
             var binding = buttonBindings[buttonBindings.length - 1];
-            var startComponent = event.link && event.link.items && event.link.items[0];
-            if (startComponent) {
-                var focusedButton = binding.direct || binding.button;
-                focusedButton.on('hover:focus hover:hover hover:touch', function () { startComponent.last = this; });
-                if (flag(setting('button_first', true), true)) startComponent.last = focusedButton[0];
-            }
+            armPriority(binding,event);
         });
         Lampa.SettingsApi.addComponent({ component: KEY, name: NAME,
             icon: LOGO });
+        var cardLogoBindings=[],cardLogoCache={},cardLogoIo=new Transport(Lampa,setting);
+        function updateCardLogo(binding) {
+            var title=binding.title;
+            if (!title.length || title[0]._lamplayLogoBinding!==binding || !root.document.documentElement.contains(title[0])) return;
+            function restore() {if (title.find('.lamplay-card-logo').length) title.text(binding.name);}
+            if (!flag(setting('card_logo',false))) return restore();
+            var data=binding.movie,source=data.source || 'tmdb';
+            if (!data.id || ['tmdb','cub'].indexOf(source)<0 || !Lampa.TMDB || !Lampa.TMDB.api || !Lampa.TMDB.key) return restore();
+            var type=/^(movie|tv)$/.test(data.media_type)?data.media_type:data.name || data.first_air_date?'tv':'movie';
+            var language=setting('logo_language',Lampa.Storage.get('language','ru')) || 'ru';
+            var key=type+'|'+data.id+'|'+language;
+            function apply(path) {
+                if (title[0]._lamplayLogoBinding!==binding) return;
+                if (!flag(setting('card_logo',false)) || !root.document.documentElement.contains(title[0])) return restore();
+                if (!path) return restore();
+                if (title.find('.lamplay-card-logo').attr('data-logo-path')===path) return;
+                var img=$('<img class="lamplay-card-logo">').attr('alt',binding.name).attr('data-logo-path',path);
+                img.on('error',function () {if (title.find('.lamplay-card-logo')[0]===this) title.text(binding.name);});
+                title.empty().append(img);
+                img.attr('src',Lampa.TMDB.image('/t/p/w500'+path.replace(/\.svg$/i,'.png')));
+            }
+            if (own(cardLogoCache,key)) return apply(cardLogoCache[key]);
+            if (binding.loading===key) return;binding.loading=key;
+            var url=Lampa.TMDB.api(type+'/'+encodeURIComponent(data.id)+'/images?api_key='+encodeURIComponent(Lampa.TMDB.key())+'&include_image_language='+encodeURIComponent(language+',en,null'));
+            cardLogoIo.request(url,null,'json',function (response) {
+                binding.loading=null;
+                var logos=list(response && response.logos),logo=logos.filter(function (l) {return l.iso_639_1===language;})[0] || logos.filter(function (l) {return l.iso_639_1==='en';})[0] || logos[0];
+                cardLogoCache[key]=logo && logo.file_path || '';apply(cardLogoCache[key]);
+            },function () {binding.loading=null;restore();});
+        }
+        function updateCardLogos() {cardLogoBindings=cardLogoBindings.filter(function (b) {return root.document.documentElement.contains(b.title[0]);});cardLogoBindings.forEach(updateCardLogo);}
+        Lampa.Listener.follow('full',function (event) {
+            if (event.type!=='complite' && event.type!=='complete') return;
+            var render=event.body || event.object && event.object.activity && event.object.activity.render();
+            if (!render) return;
+            var title=$(render).find('.full-start-new__title, .full-start__title').first(),movie=event.data && event.data.movie;
+            if (!title.length || !movie) return;
+            var binding={title:title,movie:movie,name:movie.title || movie.name || title.text()};title[0]._lamplayLogoBinding=binding;
+            cardLogoBindings=cardLogoBindings.filter(function (b) {return b.title[0]!==title[0] && root.document.documentElement.contains(b.title[0]);});
+            cardLogoBindings.push(binding);updateCardLogo(binding);
+            // The host may emit complete immediately before attaching the card.
+            setTimeout(function () {updateCardLogo(binding);},0);
+        });
+
+        // Integrated from Water-FAQ/lampa-plugins ratings.js (native Lampa metadata).
+        function createIntegratedRatings() {
+    var CACHE = 'lamplay_ratings_native_v1';
+    var DAY = 86400000;
+    var cache = {};
+    var cards = [];
+    var views = [];
+    var started = false, enabled = false, observer = null, painted = [], lines = [];
+    function active() {return enabled && !root.waterfaq_ratings;}
+    var saveTimer, cleanTimer;
+    var names = ['tmdb', 'imdb', 'kp'];
+    var queue = [], pending = {}, retryUntil = {}, revisions = {};
+    var running = 0, generation = 0, pumpTimer, intersection;
+
+    function setting(name, fallback) { return Lampa.Storage.get('lamplay_ratings_' + name, fallback); }
+    function rating(value) {
+        if (typeof value !== 'number' && typeof value !== 'string') return 0;
+        var text = String(value).trim().replace(',', '.');
+        if (!/^\d+(\.\d+)?$/.test(text)) return 0;
+        var n = Number(text);
+        return isFinite(n) && n > 0 && n <= 10 ? n : 0;
+    }
+    function format(n) { return n === 10 ? '10' : n.toFixed(1); }
+    function connected(node) { return !!node && document.documentElement.contains(node); }
+    function type(data) {
+        if (data.media_type === 'movie' || data.media_type === 'tv') return data.media_type;
+        if (data.first_air_date) return 'tv';
+        if (data.release_date) return 'movie';
+        return data.original_name || (data.name && !data.title) ? 'tv' : 'movie';
+    }
+    function key(data, method) {
+        var source = String(data.source || 'tmdb');
+        if (source === 'cub') source = 'tmdb';
+        return source + ':' + (method || type(data)) + ':' + String(data.id);
+    }
+    function valid(data) {
+        if (!data || typeof data !== 'object') return null;
+        if (data.data && !data.id) data = data.data;
+        if (data.movie && !data.id) data = data.movie;
+        return data && data.id && (data.title || data.name) && data.media_type !== 'person' && !data.known_for_department && data.source !== 'shikimori' ? data : null;
+    }
+    function cardData(node) {
+        if (node.classList.contains('LMEShikimori')) return null;
+        var candidates = [node.card_data, node._card, node.card, node.data];
+        for (var i = 0; i < candidates.length; i++) {
+            var found = valid(candidates[i]);
+            if (found) return found;
+        }
+        if (window.$) {
+            try {
+                var jq = $(node), fields = ['card_data', 'card', 'item', 'data'];
+                for (i = 0; i < fields.length; i++) {
+                    found = valid(jq.data(fields[i]));
+                    if (found) return found;
+                }
+            } catch (e) { /* Custom cards need not use jQuery data(). */ }
+        }
+        return null;
+    }
+    function extract(data) {
+        var result = {}, fields = {tmdb: 'vote_average', imdb: 'imdb_rating', kp: 'kp_rating'};
+        names.forEach(function (source) {
+            if (Object.prototype.hasOwnProperty.call(data, fields[source])) result[source] = rating(data[fields[source]]);
+        });
+        return result;
+    }
+    function cached(id, source) {
+        var entry = cache[id] && cache[id][source];
+        return entry && Date.now() - entry.time < DAY ? entry : null;
+    }
+    function values(data, id) {
+        var result = extract(data);
+        names.forEach(function (source) {
+            var entry = cached(id, source);
+            if (entry) result[source] = entry.value;
+        });
+        return result;
+    }
+    function selected(data, id) {
+        var scores = values(data, id);
+        var priority = setting('priority', 'imdb');
+        var order = priority === 'kp' ? ['kp', 'imdb', 'tmdb'] : priority === 'tmdb' ? ['tmdb', 'imdb', 'kp'] : ['imdb', 'kp', 'tmdb'];
+        for (var i = 0; i < order.length; i++) if (rating(scores[order[i]])) return scores[order[i]];
+        return 0;
+    }
+    function merge(id, incoming, full) {
+        var changed = false, record = cache[id] || {};
+        names.forEach(function (source) {
+            if (!Object.prototype.hasOwnProperty.call(incoming, source)) return;
+            var prev = cached(id, source), n = rating(incoming[source]);
+            if (!full && prev && prev.full) return;
+            if (!prev || prev.value !== n || (full && !prev.full)) {
+                record[source] = {value: n, time: Date.now(), full: !!full};
+                changed = true;
+            }
+        });
+        if (changed) { cache[id] = record; save(); }
+        return changed;
+    }
+    function save() {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(function () {
+            var ids = Object.keys(cache);
+            ids.sort(function (a, b) { return latest(cache[b]) - latest(cache[a]); });
+            ids.forEach(function (id, index) { if (index >= 1000 || Date.now() - latest(cache[id]) >= DAY) delete cache[id]; });
+            try { Lampa.Storage.set(CACHE, cache); } catch (e) { /* Keep the session cache if storage is full. */ }
+        }, 350);
+    }
+    function latest(record) {
+        var time = Number(record && record.checked) || 0;
+        names.forEach(function (source) { if (record && record[source]) time = Math.max(time, Number(record[source].time) || 0); });
+        return time;
+    }
+    function visible(node) {
+        if (!connected(node)) return false;
+        var rect = node.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && rect.bottom > -250 && rect.right > -250 && rect.top < window.innerHeight + 250 && rect.left < window.innerWidth + 250;
+    }
+    function needsLoad(data, id) {
+        var source = data.source || 'tmdb';
+        if ((source !== 'tmdb' && source !== 'cub') || !/^\d+$/.test(String(data.id))) return false;
+        if (retryUntil[id] > Date.now()) return false;
+        if (rating(values(data, id)[setting('priority', 'imdb')])) return false;
+        return !(cache[id] && Date.now() - cache[id].checked < DAY);
+    }
+    function preload(node) {
+        if (!active()) return;
+        if (!visible(node)) return;
+        var data = cardData(node);
+        if (!data) return;
+        var id = key(data);
+        if (!needsLoad(data, id)) return;
+        if (pending[id]) {
+            if (pending[id].nodes.indexOf(node) === -1) pending[id].nodes.push(node);
+            return;
+        }
+        var job = {id: id, movie: String(data.id), method: type(data), source: data.source || 'tmdb', nodes: [node], generation: generation};
+        pending[id] = job;
+        queue.push(job);
+        clearTimeout(pumpTimer);
+        pumpTimer = setTimeout(pump, 50);
+    }
+    function wanted(job) {
+        if (!active()) return false;
+        return job.nodes.some(function (node) {
+            var data = visible(node) && cardData(node);
+            return data && key(data) === job.id && needsLoad(data, job.id);
+        });
+    }
+    function metadata(job, done) {
+        var network, timer, finished = false;
+        function finish(json, error) {
+            if (finished) return;
+            finished = true;
+            clearTimeout(timer);
+            done(json, error);
+        }
+        try {
+            if (!Lampa.TMDB || typeof Lampa.TMDB.api !== 'function' || typeof Lampa.TMDB.key !== 'function' || !Lampa.Reguest) throw new Error('Metadata API unavailable');
+            var language = Lampa.Storage.get('tmdb_lang', Lampa.Storage.get('language', 'ru'));
+            var imageLanguage = String(language || 'ru').split(/[-_]/)[0];
+            // Match Lampa's primary full-metadata request. CUB enrichment is not
+            // present in the stripped-down response with only external_ids.
+            var path = job.method + '/' + encodeURIComponent(job.movie) + '?api_key=' + encodeURIComponent(Lampa.TMDB.key()) + '&language=' + encodeURIComponent(language) + '&append_to_response=content_ratings,release_dates,external_ids,keywords,alternative_titles,images&include_image_language=' + encodeURIComponent(imageLanguage + ',en,null');
+            var url;
+            // The native CUB metadata response contains IMDb/KP; the ordinary
+            // TMDB proxy often returns only TMDB. Both use the same TMDB IDs.
+            if (Lampa.Manifest && Lampa.Manifest.cub_domain) {
+                var protocol = Lampa.Utils && Lampa.Utils.protocol ? Lampa.Utils.protocol() : 'https://';
+                var account = Lampa.Storage.get('account', {});
+                if (typeof account === 'string') { try { account = JSON.parse(account); } catch (e) { account = {}; } }
+                url = protocol + 'tmdb.' + Lampa.Manifest.cub_domain + '/3/' + path + '&email=' + encodeURIComponent(account && account.email || '');
+            } else url = Lampa.TMDB.api(path);
+            network = new Lampa.Reguest();
+            timer = setTimeout(function () { finish(null, true); network.clear(); }, 15000);
+            network.timeout(12000);
+            network.silent(url, function (json) { finish(json, false); }, function () { finish(null, true); });
+        } catch (e) { finish(null, true); }
+    }
+    function pump() {
+        clearTimeout(pumpTimer);
+        while (running < 2 && queue.length) {
+            var job = queue.shift();
+            if (!wanted(job)) { if (pending[job.id] === job) delete pending[job.id]; continue; }
+            execute(job);
+        }
+    }
+    function execute(job) {
+        running++;
+        var revision = revisions[job.id] || 0;
+        metadata(job, function (json, error) {
+            running--;
+            if (pending[job.id] === job) delete pending[job.id];
+            if (job.generation === generation) {
+                // A later native full-card update takes precedence over this response.
+                if (error || !json || String(json.id) !== job.movie || (json.media_type && json.media_type !== job.method)) retryUntil[job.id] = Date.now() + 5 * 60000;
+                else if ((revisions[job.id] || 0) === revision) {
+                    var incoming = extract(json);
+                    // A successful metadata response also confirms absent ratings.
+                    if (!Object.prototype.hasOwnProperty.call(incoming, 'imdb')) incoming.imdb = 0;
+                    if (!Object.prototype.hasOwnProperty.call(incoming, 'kp')) incoming.kp = 0;
+                    merge(job.id, incoming, true);
+                    if (!cache[job.id]) cache[job.id] = {};
+                    cache[job.id].checked = Date.now();
+                    save();
+                    updateCards(job.id);
+                }
+            }
+            pumpTimer = setTimeout(pump, 120);
+        });
+    }
+    function color(n) {
+        if (setting('scale', 'detailed') === 'simple') return n < 5 ? '#E57373' : n < 7 ? '#999999' : '#81C784';
+        return n < 5 ? '#E57373' : n < 7 ? '#FFB74D' : n < 8 ? '#64B5F6' : '#81C784';
+    }
+    function paint(node, n, enabled) {
+        if (!node) return;
+        if (enabled && n) {
+            if (!node._lpRatingsOriginalColor) {node._lpRatingsOriginalColor = [node.style.getPropertyValue('color'), node.style.getPropertyPriority('color')];painted.push(node);}
+            var desired = color(n);
+            if (node._lpRatingsColor !== desired || node.style.color !== node._lpRatingsAppliedColor) node.style.setProperty('color', desired, 'important');
+            node._lpRatingsColor = desired;
+            node._lpRatingsAppliedColor = node.style.color;
+        } else if (node._lpRatingsOriginalColor) {
+            node.style.removeProperty('color');
+            if (node._lpRatingsOriginalColor[0]) node.style.setProperty('color', node._lpRatingsOriginalColor[0], node._lpRatingsOriginalColor[1]);
+            delete node._lpRatingsOriginalColor;
+            delete node._lpRatingsColor;
+            delete node._lpRatingsAppliedColor;
+        }
+    }
+    function drawCard(node) {
+        if (!active()) return;
+        var data = cardData(node), badge = node.querySelector('.lp-ratings-vote');
+        if (!data) {
+            node.classList.remove('lp-ratings-owned');
+            if (badge) badge.classList.add('hide');
+            var nativeBadge = node.querySelector('.card__vote');
+            if (nativeBadge) paint(nativeBadge, rating(nativeBadge.textContent), setting('list_color', true));
+            return;
+        }
+        var id = key(data);
+        var n = selected(data, id);
+        if (!n) {
+            node.classList.remove('lp-ratings-owned');
+            if (badge) badge.classList.add('hide');
+            return;
+        }
+        if (!badge) {
+            var container = node.querySelector('.card__view');
+            if (!container) return;
+            badge = document.createElement('div');
+            badge.className = 'lp-ratings-vote';
+            container.appendChild(badge);
+        }
+        if (badge.textContent !== format(n)) badge.textContent = format(n);
+        badge.classList.remove('hide');
+        node.classList.add('lp-ratings-owned');
+        paint(badge, n, setting('list_color', true));
+    }
+    function updateCards(id) {
+        if (!active()) return;
+        cards.forEach(function (node) {
+            if (!connected(node)) return;
+            var data = cardData(node);
+            if (!id || (data && key(data) === id)) drawCard(node);
+        });
+    }
+    function bindCard(node) {
+        if (!active()) return;
+        if (!node._lpRatingsNativeRatingsBound) {
+            node._lpRatingsNativeRatingsBound = true;
+            var update = function () {
+                if (!active()) return;
+                var data = cardData(node);
+                if (data && merge(key(data), extract(data), false)) updateCards(key(data));
+                drawCard(node);
+                preload(node);
+            };
+            node.addEventListener('visible', update);
+            node.addEventListener('hover:focus', update);
+            node.addEventListener('update', update);
+            // A few custom builders attach card_data after insertion, without a DOM change.
+            [100, 400, 1000].forEach(function (delay) { setTimeout(function () { if (connected(node)) update(); }, delay); });
+        }
+        if (cards.indexOf(node) === -1) cards.push(node);
+        if (intersection) intersection.observe(node);
+        var data = cardData(node);
+        if (data && merge(key(data), extract(data), false)) updateCards(key(data));
+        drawCard(node);
+        preload(node);
+    }
+    function colorLine(line) {
+        if (!active()) return;
+        var badges = line.querySelectorAll('.full-start__rate');
+        for (var i = 0; i < badges.length; i++) {
+            var value = badges[i].firstElementChild;
+            if (value) paint(value, rating(value.textContent), setting('full_color', true));
+        }
+        // No text, labels, visibility or order is changed in the full card.
+    }
+    function syncView(view) {
+        if (!active()) return;
+        if (view.root._lpRatingsNativeRatingsView !== view || !connected(view.root)) return;
+        var line = view.root.querySelector('.full-start-new__rate-line, .full-start__rate-line');
+        if (!line) return;
+        var incoming = extract(view.data);
+        names.forEach(function (source) {
+            var badge = line.querySelector('.rate--' + source);
+            if (!badge) return;
+            var node = badge.firstElementChild;
+            var n = rating(node && node.textContent);
+            if (n && !badge.classList.contains('hide')) {
+                incoming[source] = n;
+                view.observed[source] = true;
+            } else if (view.observed[source]) incoming[source] = 0;
+        });
+        if (merge(view.id, incoming, true)) {
+            revisions[view.id] = (revisions[view.id] || 0) + 1;
+            updateCards(view.id);
+        }
+        if (incoming.imdb !== undefined || incoming.kp !== undefined) {
+            if (!cache[view.id]) cache[view.id] = {};
+            if (!cache[view.id].checked || Date.now() - cache[view.id].checked >= DAY) { cache[view.id].checked = Date.now(); save(); }
+        }
+        colorLine(line);
+        bindLine(line, view);
+    }
+    function bindLine(line, view) {
+        if (!active()) return;
+        if (!view) {
+            var parent = line.parentNode;
+            while (parent && !view) { view = parent._lpRatingsNativeRatingsView; parent = parent.parentNode; }
+        }
+        if (view) line._lpRatingsNativeRatingsView = view;
+        if (lines.indexOf(line)<0) lines.push(line);
+        if (!line._lpRatingsNativeRatingsObserver) {
+            var timer;
+            line._lpRatingsNativeRatingsObserver = new MutationObserver(function () {
+                // Mutation observers run before paint: color new/changed values
+                // immediately, while leaving cache/poster updates debounced.
+                colorLine(line);
+                clearTimeout(timer);
+                timer = setTimeout(function () {
+                    var current = line._lpRatingsNativeRatingsView;
+                    if (current) syncView(current);
+                    else colorLine(line);
+                }, 40);
+            });
+            line._lpRatingsNativeRatingsObserver.observe(line, {childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['class']});
+        }
+        colorLine(line);
+    }
+    function onFull(e) {
+        if (!active()) return;
+        if (e.type !== 'complite' && e.type !== 'complete') return;
+        var object = e.object || {}, activity = object.activity;
+        var rendered = e.body || (activity && activity.render && activity.render());
+        var root = rendered && (rendered[0] || rendered);
+        var data = e.data && e.data.movie || object.movie || object.card;
+        if (!root || !root.querySelector || !data || !data.id) return;
+        var method = object.method === 'tv' || object.method === 'movie' ? object.method : type(data);
+        var view = {root: root, data: data, id: key(data, method), observed: {}};
+        root._lpRatingsNativeRatingsView = view;
+        views = views.filter(function (old) { return connected(old.root) && old.root !== root; });
+        views.push(view);
+        syncView(view);
+        // The complete event can precede the activity's insertion into the document.
+        setTimeout(function () { syncView(view); }, 0);
+    }
+    function discover(root) {
+        if (!active()) return;
+        if (!root || root.nodeType !== 1) return;
+        if (root.matches('.card')) bindCard(root);
+        else if (root.matches('.card__vote')) {
+            var parent = root.closest ? root.closest('.card') : null;
+            if (parent) bindCard(parent);
+        }
+        var found = root.querySelectorAll('.card');
+        for (var i = 0; i < found.length; i++) bindCard(found[i]);
+        if (root.matches('.full-start-new__rate-line, .full-start__rate-line')) {
+            bindLine(root);
+            if (root._lpRatingsNativeRatingsView) syncView(root._lpRatingsNativeRatingsView);
+        }
+        found = root.querySelectorAll('.full-start-new__rate-line, .full-start__rate-line');
+        for (i = 0; i < found.length; i++) {
+            bindLine(found[i]);
+            if (found[i]._lpRatingsNativeRatingsView) syncView(found[i]._lpRatingsNativeRatingsView);
+        }
+    }
+    function clean() {
+        cards = cards.filter(function (node) {
+            if (connected(node)) return true;
+            if (intersection) intersection.unobserve(node);
+            return false;
+        });
+        views = views.filter(function (view) { return connected(view.root); });
+    }
+    function refresh() {
+        if (!active()) return;
+        clean();
+        views.forEach(syncView);
+        updateCards();
+        cards.forEach(preload);
+        var lines = document.querySelectorAll('.full-start-new__rate-line, .full-start__rate-line');
+        for (var i = 0; i < lines.length; i++) colorLine(lines[i]);
+    }
+    function clearCache() {
+        if (root.waterfaq_ratings) {
+            var external=Lampa.SettingsApi.getParam && Lampa.SettingsApi.getParam('wf_ratings');
+            var clear=list(external).filter(function (p) {return p.param.name==='wf_ratings_clear';})[0];
+            if (clear && clear.onChange) return clear.onChange();
+        }
+        cache={};generation++;queue=[];pending={};retryUntil={};clearTimeout(saveTimer);
+        Lampa.Storage.set(CACHE,cache);refresh();Lampa.Noty.show('Кэш рейтингов очищен');
+    }
+    function init() {
+        if (started || !window.Lampa || !document.body) return;
+        started = true;
+        try { cache = Lampa.Storage.get(CACHE, {}) || {}; } catch (e) { cache = {}; }
+        if (typeof cache !== 'object' || Array.isArray(cache)) cache = {};
+        // Deliberately ignore all caches from versions that used external APIs.
+        Object.keys(cache).forEach(function (id) {
+            if (!cache[id] || typeof cache[id] !== 'object') { delete cache[id]; return; }
+            names.forEach(function (source) {
+                var entry = cache[id][source];
+                if (entry && (!isFinite(entry.time) || Date.now() - entry.time >= DAY || !isFinite(entry.value) || entry.value < 0 || entry.value > 10)) delete cache[id][source];
+            });
+        });
+        var style = document.createElement('style');
+        style.id = 'lp-ratings-style';
+        style.textContent = '.card.lp-ratings-owned .card__vote{display:none!important}' +
+            '.lp-ratings-vote{position:absolute;right:.3em;bottom:.3em;background:rgba(0,0,0,.5);color:#fff;font-size:1.3em;font-weight:700;padding:.2em .5em;border-radius:1em;z-index:1;pointer-events:none}' +
+            '.lp-ratings-vote.hide{display:none!important}';
+        document.head.appendChild(style);
+        Lampa.Listener.follow('full', onFull);
+        if (window.IntersectionObserver) intersection = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) { if (entry.isIntersecting) preload(entry.target); });
+        }, {rootMargin: '250px'});
+        observer = new MutationObserver(function (mutations) {
+            if (!active()) {suspend();syncExternal();return;}
+            var removed = false;
+            mutations.forEach(function (m) {
+                if (m.removedNodes.length) removed = true;
+                // Native poster fields may be updated in place by Lampa.
+                if (m.target.nodeType === 1 && m.target.matches('.card__vote')) {
+                    var parent = m.target.closest ? m.target.closest('.card') : null;
+                    if (parent) bindCard(parent);
+                }
+                for (var i = 0; i < m.addedNodes.length; i++) discover(m.addedNodes[i]);
+            });
+            if (removed) { clearTimeout(cleanTimer); cleanTimer = setTimeout(clean, 500); }
+        });
+        observer.observe(document.body, {childList: true, subtree: true});
+        discover(document.body);
+        if (!intersection) {
+            var scanTimer;
+            var scan = function () { clearTimeout(scanTimer); scanTimer = setTimeout(function () { clean(); cards.forEach(preload); }, 180); };
+            document.addEventListener('scroll', scan, true);
+            document.addEventListener('transitionend', scan, true);
+            window.addEventListener('resize', scan);
+        }
+        try {
+            var currentActivity = Lampa.Activity.active();
+            if (currentActivity && currentActivity.activity && (currentActivity.movie || currentActivity.card)) onFull({type: 'complite', object: currentActivity, data: {movie: currentActivity.movie || currentActivity.card}});
+        } catch (e) { /* No active activity yet. */ }
+    }
+
+    function suspend() {
+        generation++;queue=[];pending={};clearTimeout(pumpTimer);clearTimeout(saveTimer);
+        if (observer) observer.disconnect();if (intersection) intersection.disconnect();
+        lines.forEach(function (line) {if (line._lpRatingsNativeRatingsObserver) line._lpRatingsNativeRatingsObserver.disconnect();});
+        painted.forEach(function (node) {
+            if (node._lpRatingsOriginalColor && node.style.color===node._lpRatingsAppliedColor) paint(node,0,false);
+            else {delete node._lpRatingsOriginalColor;delete node._lpRatingsColor;delete node._lpRatingsAppliedColor;}
+        });painted=[];
+        cards.forEach(function (node) {node.classList.remove('lp-ratings-owned');var badge=node.querySelector('.lp-ratings-vote');if (badge) badge.remove();});
+    }
+    function syncExternal() {
+        if (!enabled || !root.waterfaq_ratings || !Lampa.SettingsApi.getParam) return;
+        var external=Lampa.SettingsApi.getParam('wf_ratings');if (!external) return;
+        ['priority','list_color','full_color','scale'].forEach(function (name) {Lampa.Storage.set('wf_ratings_'+name,setting(name,name==='priority'?'imdb':name==='scale'?'detailed':true));});
+        var param=list(external).filter(function (p) {return p.param.name==='wf_ratings_priority';})[0];
+        if (param && param.onChange) param.onChange();
+    }
+    function setEnabled(value) {
+        enabled=flag(value);
+        if (!active()) {if (started) suspend();syncExternal();return;}
+        if (!started) init();else {
+            if (observer) observer.observe(document.body,{childList:true,subtree:true});
+            lines.forEach(function (line) {if (connected(line) && line._lpRatingsNativeRatingsObserver) line._lpRatingsNativeRatingsObserver.observe(line,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['class']});});
+            discover(document.body);refresh();
+        }
+    }
+    return {setEnabled:setEnabled,refresh:function () {if (root.waterfaq_ratings) syncExternal();else refresh();},clear:clearCache};
+
+        }
+
         var childMenus = [];
         function param(name, type, label, value, values, description, component, onChange) {
             Lampa.SettingsApi.addParam({ component: component || KEY, param: { name: KEY + '_' + name, type: type, 'default': value, values: values, placeholder: 'Не задано' },
@@ -1395,6 +1996,7 @@
                 });
             });
         }
+        param('card_logo','trigger','Логотип вместо названия в карточке',false,undefined,'Использовать найденный логотип в основной карточке Lampa. Если логотип недоступен, остаётся название.',KEY,updateCardLogos);
         param('source', 'select', 'Источник по умолчанию', 'kodik', { kodik: 'Kodik', rezka: 'HDrezka', libria: 'AniLibria' });
         param('quality', 'select', 'Предпочитаемое качество', '1080', { auto: 'Лучшее доступное', '2160': '2160p', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p' });
         param('button_first', 'trigger', 'Кнопка LamPlay всегда первая', true, undefined,
@@ -1467,6 +2069,17 @@
         param('kodik_token', 'input', 'Свой API-токен', '', '', 'Пусто — подбор через get-player. Свой токен включает поиск через API.', kodikMenu);
         param('libria_host', 'input', 'Адрес API', 'https://api.anilibria.app', '', '', libriaMenu);
         param('timeout', 'select', 'Ожидание ответа', '15', { '10': '10 сек.', '15': '15 сек.', '30': '30 сек.' }, '', extraMenu);
+        var ratingsMenu=KEY+'_ratings_settings';
+        submenu(ratingsMenu,'Рейтинг');
+        var ratingsModule=createIntegratedRatings();
+        param('ratings_enabled','trigger','Включить функцию рейтингов',false,undefined,'Приоритет и окраска рейтингов по всей Lampa.',ratingsMenu,function () {ratingsModule.setEnabled(setting('ratings_enabled',false));});
+        function ratingsParam(name,type,title,value,values) {param('ratings_'+name,type,title,value,values,'',ratingsMenu,function () {ratingsModule.refresh();});}
+        ratingsParam('priority','select','Приоритет рейтинга','imdb',{imdb:'IMDb',kp:'Кинопоиск',tmdb:'TMDB'});
+        ratingsParam('list_color','trigger','Цветной рейтинг в списках',true);
+        ratingsParam('full_color','trigger','Цветные рейтинги внутри карточки',true);
+        ratingsParam('scale','select','Цветовая шкала','detailed',{detailed:'Подробная — четыре цвета',simple:'Простая — три цвета'});
+        buttonParam(ratingsMenu,'ratings_clear','Очистить кэш рейтингов',function () {ratingsModule.clear();},'Оценки хранятся сутки и загружаются через источник метаданных Lampa.');
+        ratingsModule.setEnabled(setting('ratings_enabled',false));
         buttonParam(KEY, 'about', 'О плагине', function () {
             Lampa.Noty.show('LamPlay by WaterFAQ · ' + VERSION + ' · Тестовая версия.');
         });
