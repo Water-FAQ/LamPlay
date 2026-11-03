@@ -1,10 +1,11 @@
-/* LamPlay by WaterFAQ - 0.8.0 (experimental)
+/* LamPlay by WaterFAQ - 0.10.0 (experimental)
  * Independent Lampa plugin. Direct connections only; no proxy or remote code execution.
- * Providers: HDrezka, Kodik, AniLiberty, Filmix, CDNvideohub, KinoTochka, AniMedia.
+ * Providers: HDrezka, Kodik, AniLiberty, Filmix, CDNvideohub, KinoTochka, AniMedia, VeoVeo.
  */
 (function (root) {
     'use strict';
-    var VERSION = '0.9.0';
+    var VERSION = '0.10.0';
+    var RELEASE_DATE = '03.11.2026';
     var KEY = 'lamplay';
     var NAME = 'LamPlay';
     var PLAY = '<svg class="lp-play" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 3v18l15-9z"/></svg>';
@@ -727,23 +728,47 @@
         this.id='filmix';this.title='Filmix';
         var dev=settings('filmix_device_id','') || Array(17).join('0').replace(/0/g,function(){return Math.floor(Math.random()*16).toString(16);}),maxHeight=480;
         function token(){return String(settings('filmix_token','') || 'aaaabbbbccccddddeeeeffffaaaabbbb').trim();}
+        function preferTV(){var route=settings('filmix_route','auto');return route==='tv' || route==='auto' && root.location && /^https?:$/.test(root.location.protocol) && !(root.Lampa && root.Lampa.Platform && root.Lampa.Platform.is('android'));}
+        function tvSearch(query,movie,done,fail){
+            io.request('https://api.filmix.tv/api-fx/list?search='+encodeURIComponent(query)+'&limit=48',null,'json',function(data){
+                if(!data || data.status!=='ok' || !Array.isArray(data.items))return fail(new Error('FilmixTV: поиск вернул некорректный ответ.'));
+                done(rank(data.items.map(function(r){return{id:r.id,title:r.title,original:r.original_name || r.original_title,year:r.year};}),movie));
+            },fail);
+        }
+        function tvOpen(result,done,fail){
+            io.request('https://api.filmix.tv/api-fx/post/'+encodeURIComponent(result.id)+'/video-links',null,'json',function(data){
+                var rows=[],voices=[],seen={};
+                function add(title,season,number,episode){if(!episode || !Array.isArray(episode.files) || !episode.files.some(function(f){return absolute(f.url) && +f.quality>0 && +f.quality<=maxHeight;}))return;title=String(title || 'Озвучка источника');if(!seen[title]){seen[title]=true;voices.push({id:title,title:title});}rows.push({season:String(season),number:String(number),title:episode.title || 'Серия '+number,voice:{id:title,title:title},data:{tvFiles:episode.files}});}
+                if(Array.isArray(data))data.forEach(function(ep){add(ep.voiceover,0,1,ep);});
+                else if(data && typeof data==='object')Object.keys(data).forEach(function(title){var seasons=data[title];if(!seasons || typeof seasons!=='object')return;Object.keys(seasons).forEach(function(key){var season=seasons[key];if(!season || !season.episodes)return;Object.keys(season.episodes).forEach(function(key){var ep=season.episodes[key];add(title,+season.season || +(String(key).match(/\d+/)||[])[0] || 1,+ep.episode || +(String(key).match(/\d+/)||[])[0] || 1,ep);});});});
+                if(!rows.length)return fail(new Error('FilmixTV: нет доступных видеоссылок для этой записи.'));
+                done({id:result.id,title:result.title,series:rows[0].season!=='0',voices:voices,rows:rows,maxHeight:maxHeight,transport:'tv'});
+            },fail);
+        }
+
         function api(path,params,done,fail,authToken) {
             var host=hostSetting(settings('filmix_host',''),'http://filmixapp.cyou').replace(/\/api\/v2$/i,'');
-            var query={user_dev_id:dev,user_dev_name:'Xiaomi',user_dev_token:authToken===undefined?token():authToken,user_dev_vendor:'Xiaomi',user_dev_os:'14',user_dev_apk:'2.2.0',app_lang:'ru-rRU'};
+            var query={user_dev_id:dev,user_dev_name:'Xiaomi',user_dev_token:authToken===undefined?token():authToken,user_dev_vendor:'Xiaomi',user_dev_os:'7.1.1',user_dev_apk:'2.2.9',app_lang:'ru_RU'};
             Object.keys(params||{}).forEach(function(k){query[k]=params[k];});
-            io.request(host+'/api/v2/'+path+'?'+form(query),null,'json',done,function(e){fail(new Error('Filmix ('+path+'): '+safeError(e)));},{headers:{'User-Agent':'okhttp/3.10.0'},nativeOnlyHeaders:true});
+            io.request(host+'/api/v2/'+path+'?'+form(query),null,'json',function(data){if(data && data.error){var e=data.error;return fail(new Error('Filmix: '+(e.user_message || e.message || 'API отклонил запрос')));}done(data);},function(e){fail(new Error('Filmix ('+path+'): '+safeError(e)));},{headers:{'User-Agent':'okhttp/3.10.0'},nativeOnlyHeaders:true});
         }
         this.search=function(query,movie,done,fail){
             function display(rows){done(rank(rows.map(function(r){return {id:r.id,title:r.title,original:r.orig_title || r.original_title || r.original_name,year:r.year,description:r.short_story};}),movie));}
-            function siteSearch(previous){io.request('https://filmix.gg/api/v2/suggestions?search_word='+encodeURIComponent(query),null,'json',function(data){display(list(data && data.posts));},function(e){if(previous===null)fail(e);else display(previous);},{headers:{'X-Requested-With':'XMLHttpRequest'}});}
-            api('search',{story:query},function(rows){if(Array.isArray(rows) && rows.length)display(rows);else siteSearch(Array.isArray(rows)?rows:null);},function(){siteSearch(null);});
+            function reserve(previous,error){tvSearch(query,movie,done,function(e){if(previous===null)fail(error || e);else display(previous);});}
+            function siteSearch(previous){io.request('https://filmix.gg/api/v2/suggestions?search_word='+encodeURIComponent(query),null,'json',function(data){var rows=list(data && data.posts);if(rows.length)display(rows);else reserve(previous);},function(e){reserve(previous,e);},{headers:{'X-Requested-With':'XMLHttpRequest'}});}
+            function mobile(){api('search',{story:query},function(rows){if(Array.isArray(rows) && rows.length)display(rows);else siteSearch(Array.isArray(rows)?rows:null);},function(){siteSearch(null);});}
+            if(preferTV())tvSearch(query,movie,done,mobile);else mobile();
         };
         this.profile=function(done,fail,authToken){api('user_profile',{},function(data){var user=data && data.user_data;maxHeight=user?(flag(user.is_pro_plus)?2160:flag(user.is_pro)?1080:720):480;done({user:user,maxHeight:maxHeight});},fail,authToken);};
         this.requestToken=function(done,fail){api('token_request',{},function(data){if(!data || data.status!=='ok' || !data.code || !data.user_code) return fail(new Error('Filmix: не удалось получить код привязки.'));done(data);},fail,'');};
         var provider=this;
         this.open=function(result,done,fail){
-            if(settings('filmix_token','')) return provider.profile(function(){openPost(result,done,fail);},function(){maxHeight=480;openPost(result,done,fail);});
-            maxHeight=480;openPost(result,done,fail);
+            function open(){
+                if(preferTV())tvOpen(result,done,function(tvError){openPost(result,done,function(){fail(tvError);});});
+                else openPost(result,done,function(mobileError){tvOpen(result,done,function(){fail(mobileError);});});
+            }
+            if(settings('filmix_token','')) return provider.profile(open,function(){maxHeight=480;open();});
+            maxHeight=480;open();
         };
         function openPost(result,done,fail,retried){api('post/'+encodeURIComponent(result.id),retried?{_lp_retry:Date.now()}:{},function(data){
             var links=data && data.player_links;
@@ -753,11 +778,12 @@
             if(links.playlist && Object.keys(links.playlist).length) {
                 Object.keys(links.playlist).forEach(function(s,si){Object.keys(links.playlist[s]).forEach(function(v){Object.keys(links.playlist[s][v]).forEach(function(e,ei){var f=links.playlist[s][v][e],match=String(f.link||'').match(/s(\d+)e(\d+)_/i);if(!f.link)return;add(v,v,parseInt(s,10) || match && +match[1] || si+1,parseInt(e,10) || match && +match[2] || ei+1,f);});});});
             } else list(links.movie).forEach(function(f,i){add(i,f.translation,0,1,f);});
-            if(!rows.length){if(!retried)return openPost(result,done,fail,true);return fail(new Error('Filmix: для этой записи нет доступных видеопотоков (пустой плейлист, post/'+result.id+').'));}
+            if(!rows.length){if(!retried)return openPost(result,done,fail,true);return fail(new Error('Filmix: пустой плейлист post/'+result.id+'. API может ограничивать запросы из браузера. Успешная привязка устройства не подтверждает доступ к видеопотокам.'));}
             done({id:result.id,title:result.title,series:rows[0].season!=='0',voices:voices,rows:rows,maxHeight:maxHeight});
         },function(e){if(!retried && /HTTP (404|50\d)/.test(safeError(e)))return openPost(result,done,fail,true);fail(e);});};
         this.episodes=function(release,voice,done){done(release.rows.filter(function(e){return e.voice.id===String(voice.id);}));};
         this.resolve=function(release,ep,done,fail){
+            if(ep.data.tvFiles){var q={};list(ep.data.tvFiles).forEach(function(f){var url=absolute(f.url),h=+f.quality;if(url && h>0 && h<=(release.maxHeight || maxHeight))q[h+'p']=url;});if(!Object.keys(q).length)return fail(new Error('FilmixTV: нет видеоссылок в доступном качестве.'));return done({quality:q,subtitles:[]});}
             var file=ep.data.link || '',quality={},match=file.match(/\[([\d,]+)\]/),heights=match?match[1].split(','):list(ep.data.qualities);
             heights.map(Number).filter(function(n){return n>0 && n<=(release.maxHeight || maxHeight);}).forEach(function(h){var u=absolute(file.replace(/\[[\d,]+\]|%s/,String(h)));if(u) quality[h+'p']=u;});
             // Public guest access is limited to 480p; account-only qualities are not advertised.
@@ -833,6 +859,32 @@
         this.resolve=function(release,ep,done,fail){io.request(ep.data,null,'text',function(html){try{openStream(io,playerFile(html),ep.data,done,fail);}catch(e){fail(e);}},fail);};
     }
 
+    // Catalog keys are sharded static metadata; video requests go directly to VeoVeo.
+    var veoIndexCache={};
+    function VeoVeo(io,settings){
+        this.id='veoveo';this.title='VeoVeo';
+        function base(){return hostSetting(settings('veoveo_host',''),'https://api.rstprgapipt.com');}
+        function bucket(key){var n=0;for(var i=0;i<key.length;i++)n=(n*31+key.charCodeAt(i))%32;return n;}
+        function catalog(id,done,fail){io.request(base()+'/balancer-api/proxy/playlists/catalog-api/episodes?content-id='+encodeURIComponent(id),null,'json',function(data){if(!Array.isArray(data) || !data.length)return fail(new Error('VeoVeo: источник вернул пустой плейлист.'));done(data);},fail);}
+        this.check=function(done,fail){catalog(15652,done,fail);};
+        this.search=function(query,movie,done,fail){
+            var key='t:'+normal(query),kp=movie.kinopoisk_id || movie.kinopoiskId || movie.kp_id || (movie.source==='kinopoisk'?movie.id:''),imdb=movie.imdb_id;
+            if([movie.title,movie.name,movie.original_title,movie.original_name].some(function(t){return normal(t)===normal(query);})){if(kp)key='kp:'+kp;else if(imdb)key='imdb:'+imdb;}
+            var shard=bucket(key);
+            function found(index){var rows=index[key] || [],year=String(movie.release_date || movie.first_air_date || '').slice(0,4),same=rows.filter(function(r){return year && String(r[1])===year;});if(same.length)rows=same;
+                done(rows.map(function(r){return{id:r[0],title:query,year:r[1] || '',widget:rows.length===1};}));}
+            if(veoIndexCache[shard])return found(veoIndexCache[shard]);
+            io.request('https://water-faq.github.io/LamPlay/data/veoveo/'+shard+'.json',null,'json',function(data){if(!data || Array.isArray(data) || typeof data!=='object')return fail(new Error('VeoVeo: не удалось прочитать индекс каталога.'));veoIndexCache[shard]=data;found(data);},fail);
+        };
+        this.open=function(result,done,fail){catalog(result.id,function(data){var rows=[],voices=[],seen={};data.forEach(function(ep){list(ep.episodeVariants).forEach(function(v){var url=absolute(v.filepath),title=v.title && v.title!=='DEFAULT'?v.title:'Озвучка источника';if(!url)return;var id=title;if(!seen[id]){seen[id]=true;voices.push({id:id,title:title});}rows.push({season:String(ep.season && ep.season.order || 0),number:String(ep.order || 1),title:ep.title || 'Эпизод '+(ep.order || 1),duration:v.duration,image:absolute(v.previewImageFilepath),voice:{id:id,title:title},data:url});});});if(!rows.length)return fail(new Error('VeoVeo: в плейлисте нет видеоссылок.'));done({id:result.id,title:result.title,series:rows.some(function(ep){return +ep.season>0;}),voices:voices,rows:rows});},fail);};
+        this.episodes=function(release,voice,done){done(release.rows.filter(function(ep){return ep.voice.id===voice.id;}));};
+        this.resolve=function(release,ep,done,fail){
+            // Let the player follow the content-router redirect. Resolving relative HLS
+            // variants against its original API host would produce invalid URLs.
+            function stream(url){var quality={};quality['Авто']=url;done({quality:quality,subtitles:[]});}
+            if(/\.json(?:\?|$)/i.test(ep.data))io.request(ep.data,null,'json',function(data){var src=list(data && data.sources).filter(function(v){return absolute(v.link);})[0];if(!src)return fail(new Error('VeoVeo: нет ссылки в описании потока.'));stream(absolute(src.link));},fail);else stream(ep.data);
+        };
+    }
     function searchNames(movie) {
         var ru=String(movie.title||movie.name||'').trim(), en=String(movie.original_title||movie.original_name||'').trim();
         var year=String(movie.release_date||movie.first_air_date||'').slice(0,4), all=[];
@@ -868,8 +920,8 @@
     function keepVisible(pane,target) {
         if (!pane || !target || !pane.contains(target)) return;
         var box=pane.getBoundingClientRect(),rect=target.getBoundingClientRect(),gap=8;
-        if (pane.classList.contains('lp-body-pane') && target.classList.contains('lp-episode')) {
-            var horizontal=pane.closest('.lamplay').getAttribute('data-view')!=='vertical';
+        if (pane.classList.contains('lp-strip') || pane.classList.contains('lp-tools') && pane.closest('.lamplay').getAttribute('data-view')!=='vertical' || pane.classList.contains('lp-body-pane') && target.classList.contains('lp-episode')) {
+            var horizontal=!pane.classList.contains('lp-body-pane') || pane.closest('.lamplay').getAttribute('data-view')!=='vertical';
             var dest=horizontal?pane.scrollLeft+rect.left-box.left+(rect.width-pane.clientWidth)/2:pane.scrollTop+rect.top-box.top+(rect.height-pane.clientHeight)/2;
             dest=Math.max(0,Math.min(dest,horizontal?pane.scrollWidth-pane.clientWidth:pane.scrollHeight-pane.clientHeight));
             if (pane._lpScrollFrame) root.cancelAnimationFrame(pane._lpScrollFrame);
@@ -905,11 +957,11 @@
         var days=Math.round((Date.UTC(parts[0],parts[1]-1,parts[2])-Date.UTC(today.getFullYear(),today.getMonth(),today.getDate()))/86400000);
         return days>0?'Осталось дней: '+days:'';
     }
-    var Core = { episodeHash:episodeHash,mergeEpisodes:mergeEpisodes,availability:availability,exactResult: exactResult, searchNames: searchNames, maxQuality: maxQuality, keepVisible: keepVisible, progressText: progressText, VERSION: VERSION, form: form, absolute: absolute, hostSetting: hostSetting, rank: rank,
+    var Core = { episodeHash:episodeHash,mergeEpisodes:mergeEpisodes,availability:availability,exactResult: exactResult, searchNames: searchNames, maxQuality: maxQuality, keepVisible: keepVisible, progressText: progressText, VERSION: VERSION, RELEASE_DATE: RELEASE_DATE, form: form, absolute: absolute, hostSetting: hostSetting, rank: rank,
         rezkaDecode: rezkaDecode, kodikDecode: kodikDecode, labelledLinks: labelledLinks, chooseQuality: chooseQuality,
         parseRezkaSearch: parseRezkaSearch, parseRezkaPage: parseRezkaPage, rezkaEpisodes: rezkaEpisodes,
         kodikResults: kodikResults, parseKodikPlayer: parseKodikPlayer, kodikEndpoint: kodikEndpoint, kodikCatalog: kodikCatalog,
-        Filmix: Filmix, CDNVideoHub: CDNVideoHub, KinoTochka: KinoTochka, AniMedia: AniMedia, playerFile: playerFile, hlsQualities: hlsQualities, Transport: Transport, Rezka: Rezka, Kodik: Kodik, Libria: Libria, flag: flag, movieKey: movieKey,
+        VeoVeo: VeoVeo, Filmix: Filmix, CDNVideoHub: CDNVideoHub, KinoTochka: KinoTochka, AniMedia: AniMedia, playerFile: playerFile, hlsQualities: hlsQualities, Transport: Transport, Rezka: Rezka, Kodik: Kodik, Libria: Libria, flag: flag, movieKey: movieKey,
         rememberSource: rememberSource, episodeTitle: episodeTitle, prepareStreams: prepareStreams,
         fixRezkaStream: fixRezkaStream, mergeCookies: mergeCookies, cookieHeader: cookieHeader, RezkaSession: RezkaSession };
     if (typeof module !== 'undefined' && module.exports) { module.exports = Core; return; }
@@ -931,7 +983,7 @@
         if(!setting('filmix_device_id','')) save('filmix_device_id',Array(17).join('0').replace(/0/g,function(){return Math.floor(Math.random()*16).toString(16);}));
         if(!flag(setting('migrated_050_source',false))) {if(!setting('source','') || setting('source','')==='kodik') save('source','rezka');save('migrated_050_source',true);}
         function buildProviders(io) {
-            return [new Rezka(io, setting, new RezkaSession(io, setting, save, Lampa)), new Kodik(io, setting), new Libria(io, setting), new Filmix(io, setting), new CDNVideoHub(io,setting), new KinoTochka(io, setting), new AniMedia(io, setting)];
+            return [new Rezka(io, setting, new RezkaSession(io, setting, save, Lampa)), new Kodik(io, setting), new Libria(io, setting), new Filmix(io, setting), new CDNVideoHub(io,setting), new KinoTochka(io, setting), new AniMedia(io, setting), new VeoVeo(io,setting)];
         }
         function saveResume(key, value) {
             var all=object(setting('resume',{})),updated={};
@@ -939,6 +991,7 @@
             Object.keys(updated).sort(function (a,b) {return (+updated[b].updated||0)-(+updated[a].updated||0);}).slice(500).forEach(function (k) {delete updated[k];});
             save('resume',updated);
         }
+        var sourceHealth = {};
         var currentPlayback = null, lastProgressSave = 0, activeScreen = null, cardBackgroundSnapshot=null;
         function captureCardBackground(render) {
             cardBackgroundSnapshot=null;var image=render.find('.full-start__background.loaded').last();
@@ -998,6 +1051,7 @@
             var self = this, movie = options.movie || {}, key = movieKey(movie);
             var io = new Transport(Lampa, setting), metadataIo = new Transport(Lampa, setting), probeIo = new Transport(Lampa, setting);
             var providers = buildProviders(io), probeProviders = buildProviders(probeIo);
+            var healthIo=new Transport(Lampa,setting), healthProviders=buildProviders(healthIo), healthPending=[], healthActive=0, healthNodes={}, healthStarted=false;
             var source = providers.filter(function (p) { return p.id === historySource(movie); })[0] || providers[0];
             var initialQuery = movie.title || movie.name || movie.original_title || movie.original_name || '';
             var resultsVisible=false;
@@ -1009,8 +1063,8 @@
                 nativeBackground=nativeImage.clone().removeAttr('id').removeClass('dim').addClass('lp-native-background');
                 nativeBackground.css({position:'fixed',left:(rect.left/root.innerWidth*100)+'vw',top:(rect.top/root.innerHeight*100)+'vh',width:(rect.width/root.innerWidth*100)+'vw',height:(rect.height/root.innerHeight*100)+'vh',margin:0,transform:'none',transition:'none',opacity:style.opacity,zIndex:0});
             }
-            var errorMessage = '', resizeTimer = null, migratedProgress = {};
-            var vignette=$('<div class="lp-vignette" aria-hidden="true"><div class="lp-vignette-edge"></div></div>');
+            var errorMessage = '', resizeTimer = null, migratedProgress = {},geometryStamp='';
+            var vignette=$('<div class="lp-vignette" aria-hidden="true"><div class="lp-vignette-edge"></div><div class="lp-vignette-bottom"></div></div>');
             var busy = false, destroyed = false, last = null, generation = 0, reverse = false, pendingResume = null;
             var cache = {}, probeQueue = [], probing = 0, observed = null, metadata = { details: movie, seasons: {}, id: null, request: 0, signature: '' };
             var type = /^(tv|movie)$/.test(movie.media_type) ? movie.media_type : movie.name || movie.first_air_date ? 'tv' : 'movie';
@@ -1029,7 +1083,7 @@
             function series() { return release && typeof release.series === 'boolean' ? release.series : type === 'tv'; }
             function view() { var v = setting(series() ? 'view_series' : 'view_movie', series() ? 'horizontal' : 'vertical'); return ['horizontal','vertical','card'].indexOf(v) < 0 || !series() && v === 'horizontal' ? 'vertical' : v; }
             function focusNode(node) {
-                node = $(node);last = node[0];lastControl=node.attr('data-lp-control') || '';if(lastControl) returnFilter=lastControl;if (last && last._lpEpisodeKey) lastEpisodeKey=last._lpEpisodeKey;
+                node = $(node);if(node.hasClass('lp-episode'))fitEpisodeGeometry();last = node[0];lastControl=node.attr('data-lp-control') || '';if(lastControl) returnFilter=lastControl;if (last && last._lpEpisodeKey) lastEpisodeKey=last._lpEpisodeKey;
                 node.parents('.lp-scroll').each(function () { keepVisible(this,node[0]); });
                 if (node[0] && node[0]._lpProbe) enqueueProbe(node[0]._lpProbe);
             }
@@ -1084,7 +1138,7 @@
                 if (error && retryAction) status.append(interactive($('<span class="lp-retry">Повторить попытку</span>'),function () { retryAction(); }));
             }
             function begin(message,retry) { changeGeneration();busy=true;retryAction=retry;setStatus(message);refreshControls();
-                if(!body.children().length && !resultsVisible){for(var sk=0;sk<6;sk++)body.append('<div class="lamplay__item lp-episode lp-skeleton" aria-hidden="true"><div class="lp-picture"></div><div class="lp-episode-info"><div class="lp-skeleton-line"></div><div class="lp-skeleton-line"></div><div class="lp-skeleton-line"></div></div></div>');}self.start(); }
+                if(!body.children().length && !resultsVisible){for(var sk=0;sk<6;sk++)body.append('<div class="lamplay__item lp-episode lp-skeleton" aria-hidden="true"><div class="lp-picture"></div><div class="lp-episode-info"><div class="lp-skeleton-line"></div><div class="lp-skeleton-line"></div><div class="lp-skeleton-line"></div></div></div>');}fitEpisodeGeometry();self.start(); }
             function finish() { busy=false;setStatus('');refreshControls(); }
             function failed(e) { if (destroyed) return;busy=false;setStatus(safeError(e),true);refreshControls();var retry=status.find('.lp-retry');if(retry.length)last=retry[0];self.start(); }
             function cancel() { changeGeneration();busy=false;setStatus('Загрузка отменена. Измените поиск или источник.');refreshControls();self.start(); }
@@ -1109,15 +1163,26 @@
                     var url=imageURL(movie.backdrop_path,'w1280') || movie.background_image;
                     if(url) nativeBackground=setImage($('<img class="full-start__background loaded lp-native-background" alt="">'),url).css({position:'fixed',transition:'none',zIndex:0});
                 }
-                if(nativeBackground) {if(!nativeBackground.parent().length) $('body').prepend(nativeBackground);nativeBackground.css('display',sharp?'block':'none');}
-                if(sharp){if(!vignette.parent().length) $('body').prepend(vignette);if(nativeBackground){vignette.insertAfter(nativeBackground);var bgRect=nativeBackground[0].getBoundingClientRect();vignette.find('.lp-vignette-edge').css({left:bgRect.left+'px',width:bgRect.width+'px'});}}else vignette.detach();
+                if(nativeBackground) {nativeBackground.off('load.lpVignette').on('load.lpVignette',function(){if(!destroyed)syncBackground(view());});if(!nativeBackground.parent().length) $('body').prepend(nativeBackground);nativeBackground.css('display',sharp?'block':'none');}
+                if(sharp){if(!vignette.parent().length) $('body').prepend(vignette);if(nativeBackground){vignette.insertAfter(nativeBackground);var bgRect=nativeBackground[0].getBoundingClientRect();vignette.find('.lp-vignette-edge').css({left:bgRect.left+'px',width:bgRect.width+'px'});var fadeTop=Math.max(0,bgRect.top+bgRect.height*.38),fadeEnd=Math.max(1,bgRect.bottom-fadeTop);vignette.find('.lp-vignette-bottom').css({top:fadeTop+'px',background:'linear-gradient(to bottom,transparent 0px,rgba(0,0,0,.55) '+(fadeEnd*.65)+'px,#000 '+fadeEnd+'px,#000 100%)'});}}else vignette.detach();
                 var bg=Lampa.Utils && Lampa.Utils.cardImgBackground ? Lampa.Utils.cardImgBackground(movie) : imageURL(movie.poster_path || movie.backdrop_path,'w200');
                 if(v!=='card') bg=imageURL(metadata.details.backdrop_path || metadata.details.poster_path,'w200');
                 if (bg && bg!==lastBackground && Lampa.Background && Lampa.Background.change) {Lampa.Background.change(bg);lastBackground=bg;}
             }
             function releaseBackground() { lastBackground='';$('body').removeClass('lp-active lp-card-background');if(nativeBackground) nativeBackground.detach();vignette.detach(); }
+            function fitEpisodeGeometry(){
+                if(view()==='vertical' || !series() || !html[0].isConnected || bodyPane[0].clientHeight<50)return;
+                var stamp=[view(),root.innerWidth,root.innerHeight,bodyPane[0].clientHeight,body.children().length].join('|');if(stamp===geometryStamp)return;geometryStamp=stamp;
+                var cards=body.find('.lp-episode'),pictures=cards.find('.lp-picture');cards.css('width','');pictures.css('height','');
+                if(root.innerWidth<=900 || root.innerHeight<=500)return;
+                var pane=bodyPane[0],style=root.getComputedStyle(pane),space=pane.clientHeight-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom)-36,overhead=0;
+                cards.each(function(){var picture=$(this).find('.lp-picture')[0];if(picture)overhead=Math.max(overhead,this.offsetHeight-picture.offsetHeight);});
+                var first=pictures[0];if(!first)return;var h=first.offsetHeight,limit=Math.max(24,space-overhead);
+                if(limit<h){cards.each(function(){var w=this.offsetWidth;$(this).css('width',Math.max(48,w*limit/h)+'px');});pictures.css('height',limit+'px');}
+                pane.scrollTop=0;
+            }
             function fitStrip() {top.css('min-height','');setTimeout(function(){if(destroyed)return;html.find('.lp-control-value').each(function(){$(this).toggleClass('lp-clipped',this.scrollWidth>this.clientWidth+1);});},0);}
-            function resized(){clearTimeout(resizeTimer);resizeTimer=setTimeout(function(){if(!destroyed){layout();if(last && html[0].contains(last))focusNode(last);}},100);}
+            function resized(){clearTimeout(resizeTimer);resizeTimer=setTimeout(function(){if(!destroyed){layout();fitEpisodeGeometry();if(last && html[0].contains(last))focusNode(last);}},100);}
             $(root).on('resize.lamplay',resized);
             function controlTarget(id) { return filters.add(tools).find('[data-lp-control]').filter(function () {return $(this).attr('data-lp-control')===id;}).first(); }
             function searchMenu() {
@@ -1131,6 +1196,31 @@
                     } else {query=value;search();}
                 });
             }
+            function paintHealth(id) {
+                var state=sourceHealth[id],nodes=healthNodes[id] || [];
+                nodes.forEach(function(node){node.attr('data-state',state && state.state || 'pending').attr('title',state && state.message || 'Проверка подключения');});
+            }
+            function checkSources() {
+                if(healthStarted)return;healthStarted=true;
+                healthProviders.forEach(function(p){var cached=sourceHealth[p.id];if(!cached || Date.now()-cached.time>180000)healthPending.push(p);});
+                function pump(){
+                    if(destroyed)return;
+                    while(healthActive<2 && healthPending.length){(function(p){
+                        if(p.id==='cdnvideohub' && !(movie.kinopoisk_id || movie.kinopoiskId || movie.kp_id || movie.source==='kinopoisk')){sourceHealth[p.id]={state:'unknown',time:Date.now(),message:'Для проверки нужен ID Кинопоиска'};paintHealth(p.id);return;}
+                        healthActive++;var ended=false;
+                        function finish(error){if(ended || destroyed)return;ended=true;healthActive--;sourceHealth[p.id]={state:error?'error':'ok',time:Date.now(),message:error?safeError(error):'Источник ответил корректно. Наличие конкретного видео не проверялось.'};paintHealth(p.id);pump();}
+                        try{if(p.check)p.check(function(){finish();},finish);else p.search(initialQuery,movie,function(){finish();},finish);}catch(e){finish(e);}
+                    })(healthPending.shift());}
+                }
+                pump();
+            }
+            function sourceMenu(){
+                healthNodes={};checkSources();
+                Lampa.Select.show({title:'Источник',items:providers.map(function(p){return{title:p.title,value:p.id,selected:p.id===source.id};}),
+                    onDraw:function(item,data){var dot=$('<span class="lp-source-dot" aria-hidden="true"></span>');item.find('.selectbox-item__title').append(dot);(healthNodes[data.value] || (healthNodes[data.value]=[])).push(dot);paintHealth(data.value);},
+                    onSelect:function(i){healthNodes={};source=providers.filter(function(p){return p.id===i.value;})[0];saveSource(movie,i.value);pendingResume=null;search();},
+                    onBack:function(){healthNodes={};self.start();}});
+            }
             function refreshControls() {
                 var restoreControl=lastControl;tools.empty();filters.empty();
                 if (release && series()) {
@@ -1143,11 +1233,7 @@
                 } else if (busy && !resultsVisible && series()) {
                     ['Сезоны','Перевод'].forEach(function(label){filters.append($('<div class="lp-strip-group lp-loading-group"><div class="lp-caption"></div><div class="lp-strip"><div class="lamplay__control">Загрузка</div></div></div>').find('.lp-caption').text(label).end());});
                 }
-                control('Источник: '+source.title,function () {
-                    select('Источник',providers.map(function (p) {return {title:p.title,value:p.id};}),source.id,function (id) {
-                        source=providers.filter(function (p) {return p.id===id;})[0];saveSource(movie,id);pendingResume=null;search();
-                    });
-                });
+                control('Источник: '+source.title,sourceMenu);
                 if (release && series()) control('Порядок: '+(reverse?'Обратный':'Стандартный'),function () {reverse=!reverse;renderEpisodes();});
                 control('Вид: '+({horizontal:'Лента',vertical:'Список',card:'Витрина'}[view()]),function () {
                     var names=series()?['horizontal','vertical','card']:['vertical','card'];
@@ -1315,7 +1401,7 @@
             function renderEpisodes(restore) {
                 if (!release || destroyed) return;var restoreControl=openingEpisode?'':lastControl;
                 if(openingEpisode){var saved=savedResume();if(saved && saved.source===source.id && resultSelected && String(saved.result.id)===String(resultSelected.id)){var ep=visibleEpisodes().filter(function(e){return String(e.season)===String(saved.season)&&String(e.number)===String(saved.number)&&String(voiceOf(e).id)===String(saved.voice.id);})[0];if(ep)restore=streamKey(ep);}}
-                stopProbes();body.empty();refreshControls();renderHero();setStatus('');
+                stopProbes();geometryStamp='';body.empty();refreshControls();renderHero();setStatus('');
                 var ticket=generation;
                 visibleEpisodes().forEach(function (ep) {
                     if (ep.loadSeason) {body.append(interactive($('<div class="lamplay__item"></div>').text(ep.title),loadEpisodes));return;}
@@ -1348,12 +1434,13 @@
                     if (series() || desc) info.append($('<div class="lp-description"></div>').text(desc || ''));
                     node.append(picture,info);body.append(node);
                     if(ep.unavailable){
-                        var notice=availability(m.air_date) || 'Недоступна в данной озвучке';
+                        var futureNotice=availability(m.air_date),notice=futureNotice || 'Недоступна в данной озвучке';if(futureNotice){info.find('.lp-row-duration').remove();meta.children().first().empty();meta.find('.lp-meta-separator').remove();}
                         node.addClass('lp-unavailable').attr({'aria-disabled':'true','data-lp-availability':notice});
-                        picture.find('.lp-episode-number,.lp-focus-play,.lp-runtime,.lp-percent,.lp-progress,.lp-quality').remove();
+                        picture.find('.lp-episode-number,.lp-focus-play,.lp-runtime,.lp-percent,.lp-quality').remove();picture.find('.lp-progress i').css('width','0%');
                         picture.append($('<span class="lp-unavailable-number"></span>').text(('0'+ep.number).slice(-Math.max(2,String(ep.number).length))));
-                        info.find('.lp-watched,.lp-progress,.lp-quality-meta').remove();info.find('.lamplay__item-title').text(m.name || 'Эпизод '+ep.number);
-                        info.append($('<div class="lp-availability"></div>').text(notice));
+                        info.find('.lp-watched,.lp-quality-meta,.lp-description').remove();info.find('.lp-progress i').css('width','0%');info.find('.lamplay__item-title').text(m.name || 'Эпизод '+ep.number);
+                        var availabilityNode=$('<div class="lp-availability"></div>').text(notice);
+                        if(view()==='vertical')meta.append(availabilityNode);else info.append(availabilityNode);
                         return;
                     }
                     var task={ep:ep,node:node,badge:badge,qualityMeta:qualityMeta,ticket:ticket,source:source.id,key:streamKey(ep),release:release};node[0]._lpProbe=task;
@@ -1364,7 +1451,7 @@
                     body.find('.lp-episode').each(function () {observed.observe(this);});
                 }
                 last=restore?body.find('.lp-episode').filter(function () {return this._lpEpisodeKey===restore;})[0]:null;
-                last=restoreControl && controlTarget(restoreControl)[0] || last || body.find('.selector')[0] || tools.find('.selector')[0];openingEpisode=false;self.start();fitStrip();
+                last=restoreControl && controlTarget(restoreControl)[0] || last || body.find('.selector')[0] || tools.find('.selector')[0];openingEpisode=false;fitEpisodeGeometry();self.start();fitStrip();
             }
             function showQuality(task,streams) {
                 if (!task.node[0].isConnected || task.ticket!==generation) return;
@@ -1470,7 +1557,7 @@
             }
             this.create=function () {activeScreen=self;renderHero();refreshControls();loadMetadata();search();return html;};
             this.render=function () {return html;};
-            this.start=function () {
+            this.start=function () {fitEpisodeGeometry();
                 if (!inActivity()) return;
                 syncBackground(resultsVisible?'results':view());
                 Lampa.Controller.add('content',{toggle:function () {
@@ -1506,6 +1593,10 @@
                 function nearest(candidates,axis){var r=current[0].getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2,best=null,score=Infinity;
                     candidates.each(function(){if(this===current[0])return;var t=this.getBoundingClientRect();if(!t.width || !t.height)return;var dx=t.left+t.width/2-cx,dy=t.top+t.height/2-cy;if(axis==='up' && dy>=-4 || axis==='down' && dy<=4 || axis==='left' && dx>=-4 || axis==='right' && dx<=4)return;var val=(axis==='up'||axis==='down')?Math.abs(dy)+Math.abs(dx)*.35:Math.abs(dx)+Math.abs(dy)*.35;if(val<score){score=val;best=this;}});return best;}
                 function focus(target){if(target){Lampa.Controller.collectionFocus(target,html);return true;}return false;}
+                if(filter && (parent.hasClass('lp-strip') || parent[0]===tools[0] && view()!=='vertical') && (dir==='left' || dir==='right')){
+                    var sibling=dir==='right'?current.nextAll('.selector').first():current.prevAll('.selector').first();
+                    if(sibling.length){focus(sibling[0]);return;}
+                }
                 var retry=status.find('.lp-retry');
                 if(current.hasClass('lp-retry')){
                     if(dir==='up' || dir==='left'){if(!focus(nearest(html.find('.selector').not('.lp-retry'),dir)))Lampa.Controller.toggle('head');}
@@ -1514,7 +1605,7 @@
                 if(filter && parent[0]===tools[0] && dir==='down' && view()!=='vertical'){
                     var candidates=retry.length?retry:body.find('.lp-episode');if(focus(nearest(candidates,'down')))return;
                 }
-                if(filter && view()==='vertical' && dir==='right' && (retry.length || body.find('.lp-episode').length)){
+                if(filter && parent[0]===tools[0] && view()==='vertical' && dir==='right' && (retry.length || body.find('.lp-episode').length)){
                     if(focus(nearest(retry.length?retry:body.find('.lp-episode'),'right')))return;
                 }
                 if((filter || current.hasClass('lp-continue')) && dir==='up'){
@@ -1533,7 +1624,8 @@
             this.pause=function () {releaseBackground();};this.stop=function () {releaseBackground();};
             var resizeHandler=function(){if(inActivity()) syncBackground(resultsVisible?'results':view());fitStrip();};root.addEventListener('resize',resizeHandler);
             this.playerClosed=function () {if (release && !busy && !errorMessage) renderEpisodes(lastEpisodeKey);else renderHero();};
-            this.destroy=function () {$(root).off('resize.lamplay',resized);clearTimeout(resizeTimer);html.find('.lp-scroll').each(function(){if(this._lpScrollFrame)root.cancelAnimationFrame(this._lpScrollFrame);});releaseBackground();vignette.remove();if(nativeBackground) nativeBackground.remove();root.removeEventListener('resize',resizeHandler);destroyed=true;if (activeScreen===self) activeScreen=null;changeGeneration();metadataIo.clear();html.remove();};
+            var healthStartTimer=setTimeout(checkSources,1200);
+            this.destroy=function () {clearTimeout(healthStartTimer);healthPending=[];healthIo.clear();$(root).off('resize.lamplay',resized);clearTimeout(resizeTimer);html.find('.lp-scroll').each(function(){if(this._lpScrollFrame)root.cancelAnimationFrame(this._lpScrollFrame);});releaseBackground();vignette.remove();if(nativeBackground) nativeBackground.remove();root.removeEventListener('resize',resizeHandler);destroyed=true;if (activeScreen===self) activeScreen=null;changeGeneration();metadataIo.clear();html.remove();};
         }
 
         $('<style id="lamplay-style"></style>').text([
@@ -1704,6 +1796,17 @@
             }
             buttonBindings.push(binding); updateButton(binding);
         }
+        if(Lampa.Manifest && !(Lampa.Manifest.plugins || []).some(function(p){return p.component===KEY;}))Lampa.Manifest.plugins={type:'video',version:VERSION,name:NAME,description:'Смотреть онлайн',component:KEY,
+            onContextMenu:function(){return{name:'LamPlay',description:'Смотреть онлайн'};},
+            onContextLauch:function(movie){cardBackgroundSnapshot=null;Lampa.Activity.push({component:KEY,title:NAME,movie:movie,page:1,url:''});}};
+        var nativeSelectShow=Lampa.Select.show;
+        Lampa.Select.show=function(options){
+            if(options && options.items && flag(setting('button_first',true),true)){
+                var index=options.items.map(function(i){return i.title===NAME && (i.subtitle==='Смотреть онлайн' || i.description==='Смотреть онлайн');}).indexOf(true);
+                if(index>0){options.items=options.items.slice();options.items.unshift(options.items.splice(index,1)[0]);}
+            }
+            return nativeSelectShow.apply(this,arguments);
+        };
         Lampa.Listener.follow('full', function (event) {
             if (event.type !== 'complite') return;
             buttonBindings = buttonBindings.filter(function (entry) {
@@ -2315,7 +2418,7 @@
         menuIcons.filmix='<svg viewBox="0 0 58 57" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 20.4V45h6.8V34.1h9.9V27h-9.9v-2.6c0-2.8 2.1-4.6 4.4-4.6H39V13H26.8c-3.1 0-6.8 2.5-6.8 7.4Z" fill="currentColor"/><rect x="2" y="2" width="54" height="53" rx="5" stroke="currentColor" stroke-width="4"/></svg>';
         var filmixMenu=KEY+'_filmix_settings';submenu(filmixMenu,'Filmix','filmix');
         var ratingsMenu=KEY+'_ratings_settings';submenu(ratingsMenu,'Рейтинг','rating');
-        param('source', 'select', 'Источник по умолчанию', 'rezka', { kodik: 'Kodik', rezka: 'HDrezka', libria: 'AniLiberty', filmix: 'Filmix', cdnvideohub:'CDNvideohub', kinotochka: 'KinoTochka', animedia: 'AniMedia' });
+        param('source', 'select', 'Источник по умолчанию', 'rezka', { kodik: 'Kodik', rezka: 'HDrezka', libria: 'AniLiberty', filmix: 'Filmix', cdnvideohub:'CDNvideohub', kinotochka: 'KinoTochka', animedia: 'AniMedia',veoveo:'VeoVeo' });
         param('quality', 'select', 'Предпочитаемое качество', '1080', { auto: 'Лучшее доступное', '2160': '2160p', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p' });
         param('button_first', 'trigger', 'Кнопка LamPlay всегда первая', true, undefined,
             'Размещать LamPlay перед остальными кнопками просмотра в карточке.', KEY, updateButtons);
@@ -2401,10 +2504,13 @@
             },function(e){if(!closed)modal.find('.broadcast__device').text(safeError(e));});
         });
         Lampa.SettingsApi.addParam({component:filmixMenu,param:{name:KEY+'_filmix_status',type:'button'},field:{name:'Статус Filmix'},onRender:function(item){filmixStatusItem=item;if(!item.find('.settings-param__value').length)item.append('<div class="settings-param__value"></div>');item.find('.settings-param__value').text(setting('filmix_status','Не авторизован'));}});
+        param('filmix_route','select','Подключение Filmix','auto',{auto:'Автоматически',tv:'FilmixTV (HTTPS)',mobile:'Мобильный API'},'В браузере автоматически используется FilmixTV; мобильный API сохраняет привязку устройства.',filmixMenu);
         param('filmix_host','input','Filmix - адрес API','http://filmixapp.cyou','','Адрес сервиса API. Для HTTP-адреса сама Lampa также должна быть открыта по HTTP.',filmixMenu);
+        buttonParam(filmixMenu,'filmix_api_mirrors','Выбрать адрес API Filmix',function(){var hosts=['http://filmixapp.cyou','http://filmixapp.vip','http://fxapp.biz'];Lampa.Select.show({title:'Адрес API Filmix',items:hosts.map(function(host){return{title:host,value:host,selected:host===setting('filmix_host','http://filmixapp.cyou')};}),onSelect:function(item){save('filmix_host',item.value);sourceHealth={};Lampa.Noty.show('Адрес Filmix сохранён. Повторно откройте источник.');Lampa.Controller.toggle('settings_component');},onBack:function(){Lampa.Controller.toggle('settings_component');}});},'Альтернативные адреса мобильного API. Смена адреса не снимает ограничения браузера.');
         Lampa.SettingsApi.addParam({component:filmixMenu,param:{name:KEY+'_filmix_token',type:'input',default:'',values:''},field:{name:'Токен устройства Filmix',description:'Сохраняется автоматически после привязки устройства.'},onRender:function(item){filmixTokenItem=item;},onChange:function(){filmixStatus(null);}});
         param('filmix_device_id','input','Идентификатор устройства',setting('filmix_device_id',''),'','Сохраняется между запусками. Для токена укажите связанный с ним идентификатор устройства.',filmixMenu);
         buttonParam(filmixMenu,'filmix_profile','Проверить доступ аккаунта',function(){var network=new Transport(Lampa,setting);new Filmix(network,setting).profile(function(p){Lampa.Noty.show('Filmix: '+filmixStatus(p));},function(e){Lampa.Noty.show(safeError(e));});},'Проверяет токен прямым запросом к API Filmix.');
+        param('veoveo_host','input','VeoVeo - адрес API','https://api.rstprgapipt.com','','Каталог и видео запрашиваются напрямую. В браузере доступ зависит от разрешений API источника.',extraMenu);
         param('kinotochka_host','input','KinoTochka - сайт','https://kinovibe.cc','','Прямые запросы требуют поддержки сайтом CORS либо нативных запросов устройства.',extraMenu);
         param('animedia_host','input','AniMedia - сайт','https://amd.online','','Собственный плеер AniMedia. Некоторые релизы используют другие плееры и недоступны.',extraMenu);
         param('timeout', 'select', 'Ожидание ответа', '15', { '10': '10 сек.', '15': '15 сек.', '30': '30 сек.' }, '', extraMenu);
@@ -2419,7 +2525,7 @@
         ratingsModule.setEnabled(setting('ratings_enabled',false));
         submenu(extraMenu, 'Дополнительно','extra');
         buttonParam(KEY, 'about', 'О плагине', function () {
-            Lampa.Noty.show('LamPlay by WaterFAQ · ' + VERSION + ' · Тестовая версия.');
+            Lampa.Noty.show('LamPlay by WaterFAQ · ' + VERSION + ' · Дата версии: ' + RELEASE_DATE + ' · Тестовая версия.');
         },'',function(item){menuIcon(item,'about');});
         $('<style></style>').text('.lamplay[data-view=card] .lamplay__control{min-height:2.3em;padding:.45em .7em}.lamplay[data-view=card] .lp-strip{padding-top:.1em;padding-bottom:.1em}.lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{display:flex;align-items:flex-end;padding-bottom:.6em}.lp-series[data-view=horizontal] .lp-episode-info,.lp-series[data-view=card] .lp-episode-info{height:7.8em;flex:none;box-sizing:border-box}@media(max-height:650px){.lp-series[data-view=horizontal] .lp-episode-info,.lp-series[data-view=card] .lp-episode-info{height:7em}}.full-start-new__body.lp-poster-stable{align-items:flex-start!important}.lp-series[data-view=horizontal] .lp-description,.lp-series[data-view=card] .lp-description{height:3.9em}.lp-series[data-view=horizontal] .lp-episode-meta,.lp-series[data-view=card] .lp-episode-meta{min-height:1.3em}.lp-series[data-view=horizontal] .lamplay__item-title,.lp-series[data-view=card] .lamplay__item-title{height:2.4em}.lp-picture{background:rgba(255,255,255,.08)}.lp-auth-dot{display:inline-block;width:.55em;height:.55em;margin-left:.6em;border-radius:50%;background:#ef5350;vertical-align:middle}.lp-auth-dot.lp-auth-confirmed{background:#4caf50}.lamplay__status.lp-error{pointer-events:auto}.lp-retry{display:inline-flex;align-items:center;min-height:2.5em;padding:.35em .7em;margin-left:.5em;border:1px solid currentColor;border-radius:.3em}.lp-drawer{position:absolute;right:0;top:0;bottom:0;width:28em;max-width:42vw;background:rgba(27,29,38,.98);z-index:25;padding:1em;overflow:auto}.lp-drawer-title{font-size:1.4em;margin-bottom:1em}.lp-drawer-item{padding:1em;min-height:3em;display:flex;align-items:center;border-radius:.25em}.lp-drawer-item.focus{background:#fff;color:#111}.lp-original-title{min-height:1.25em}.lp-original-title:empty{opacity:.25}').appendTo('head');
         $('<style></style>').text("/* Shared geometry and readable filter values. */\n.lamplay__control{gap:.35em;overflow:hidden;min-width:0}\n.lp-control-label{flex:none}.lp-control-value{opacity:.72;min-width:0;overflow:hidden;white-space:nowrap;display:block;mask-image:linear-gradient(to right,#000 calc(100% - .8em),transparent);-webkit-mask-image:linear-gradient(to right,#000 calc(100% - .8em),transparent)}\n.lamplay__control.focus .lp-control-value{opacity:.65}.lp-search svg{flex:none}\n.lamplay[data-view=vertical] .lp-side,.lamplay[data-view=results] .lp-side{width:34%;overflow-y:auto;padding:.25em}\n.lamplay[data-view=vertical] .lp-hero,.lamplay[data-view=results] .lp-hero,.lp-series[data-view=horizontal] .lp-top>.lp-hero{width:100%;height:auto;min-height:0;max-height:none;aspect-ratio:16/9;flex:none}\n.lp-series[data-view=horizontal] .lp-top>.lp-hero{width:34%;align-self:flex-start}\n.lp-series[data-view=horizontal] .lp-top{height:auto;min-height:0}\n.lamplay[data-view=vertical] .lp-resume-row,.lamplay[data-view=results] .lp-resume-row,.lp-series[data-view=horizontal] .lp-resume-row{flex-direction:row;align-items:center;gap:.6em;font-size:.9em}\n.lp-resume-row .lp-continue{font-size:.9em;flex-shrink:0;max-width:100%}.lp-resume-info{overflow:hidden}.lp-resume-title{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}\n.lp-hero-content{padding:.8em}.lp-title-slot{flex-shrink:1;min-height:0}.lp-title-logo{max-height:100%}\n.lamplay[data-view=vertical] .lp-title-slot,.lamplay[data-view=results] .lp-title-slot,.lp-series[data-view=horizontal] .lp-title-slot{height:2.5em;width:65%}\n.lp-series[data-view=horizontal] .lp-filters{justify-content:space-between;gap:.65em}\n.lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{padding:1em .65em .6em}\n.lp-picture{transition:transform .16s ease;transform-origin:center bottom}\n.lp-series[data-view=horizontal] .lp-episode.focus .lp-picture,.lp-series[data-view=card] .lp-episode.focus .lp-picture{transform:scale(1.045)}\n.lp-series[data-view=vertical] .lp-episode{transition:transform .16s ease;transform-origin:center;position:relative;border-color:transparent;outline:none}\n.lp-series[data-view=vertical] .lp-episode.lp-started{box-shadow:0 0 0 1px rgba(255,255,255,.48)}\n.lp-series[data-view=vertical] .lp-episode.focus,.lp-series[data-view=vertical] .lp-episode:focus{background:rgba(0,0,0,.35);color:#fff;border-color:transparent;box-shadow:0 0 0 .16em #fff;transform:scale(1.015);z-index:1}\n.lp-series[data-view=vertical] .lp-episode.focus .lamplay__item-detail{color:rgba(255,255,255,.8)}\n.lp-series[data-view=vertical] .lp-body-pane{padding:.65em}\nbody.lp-card-background .lp-native-background{filter:brightness(.86)!important;mask-image:radial-gradient(ellipse at 56% 42%,#000 30%,rgba(0,0,0,.78) 65%,rgba(0,0,0,.15) 100%)!important;-webkit-mask-image:radial-gradient(ellipse at 56% 42%,#000 30%,rgba(0,0,0,.78) 65%,rgba(0,0,0,.15) 100%)!important}\n.lamplay__status.lp-error{position:static;transform:none;max-width:100%;width:100%;align-self:stretch;box-sizing:border-box;margin:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1em;padding:1.5em;text-align:center;box-shadow:none;background:rgba(35,23,27,.85);min-height:9em}\n.lamplay__status.lp-error>span:first-child{max-width:38em;line-height:1.45;overflow-wrap:anywhere}\n.lp-error .lp-retry{margin:0;padding:.65em 1.1em;text-decoration:none;border:2px solid rgba(255,255,255,.65);border-radius:.4em;line-height:1.25;justify-content:center;color:#fff;background:transparent}\n.lamplay .lp-error .lp-retry.focus,.lamplay .lp-error .lp-retry:focus{background:#fff;color:#111;border-color:#fff}\n/* Narrow or shallow windows use document flow, with room for Lampa navigation. */\n@media(max-width:900px),(max-height:500px){\n.lamplay{overflow-y:auto;height:100%;font-size:1em;padding-bottom:6em;box-sizing:border-box}\n.lp-panel{height:auto;min-height:100%;padding:.65em;overflow:visible}\n.lp-main,.lp-side{overflow:visible!important}.lp-body-pane{overflow:visible;flex:none;min-height:0}\n.lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{align-items:flex-start;overflow-x:auto;overflow-y:hidden;flex:none;padding:1em .6em}\n.lp-series[data-view=horizontal] .lp-episode,.lp-series[data-view=card] .lp-episode{width:38vw;min-width:11em;max-width:20em}\n.lp-series[data-view=horizontal] .lp-picture,.lp-series[data-view=card] .lp-picture{height:auto;aspect-ratio:16/9}\n.lp-series[data-view=horizontal] .lp-filters{justify-content:flex-start;gap:.7em}\n.lamplay[data-view=card] .lp-resume-row{flex-wrap:wrap}.lamplay[data-view=card] .lp-top{gap:.7em}\n.lamplay[data-view=vertical] .lp-resume-row,.lamplay[data-view=results] .lp-resume-row,.lp-series[data-view=horizontal] .lp-resume-row{flex-wrap:wrap}\n.lamplay[data-view=vertical] .lp-side,.lamplay[data-view=results] .lp-side{width:34%}\n.lp-hero-content{padding:.5em}.lp-hero .lp-continue{font-size:.8em;min-height:2.4em;padding:.35em .5em}\n}\n@media(max-width:600px){\n.lp-panel,.lp-top{flex-direction:column!important;height:auto!important}\n.lamplay[data-view=vertical] .lp-side,.lamplay[data-view=results] .lp-side,.lp-series[data-view=horizontal] .lp-top>.lp-hero{width:100%}\n.lp-hero{aspect-ratio:16/9;min-height:0!important}.lp-main{flex:none;width:100%}\n.lamplay[data-view=vertical] .lp-tools,.lamplay[data-view=results] .lp-tools{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible}\n.lamplay[data-view=vertical] .lp-tools>.lamplay__control{height:2.8em;font-size:1em}\n.lp-series[data-view=vertical] .lp-picture{width:30%;min-width:0;height:auto;aspect-ratio:16/9;align-self:center}\n.lp-series[data-view=vertical] .lp-episode-info{font-size:.85em;padding:.35em;position:relative}\n.lp-series[data-view=vertical] .lp-row-duration{position:static;float:right;margin-left:.5em}\n.lp-series[data-view=horizontal] .lp-episode,.lp-series[data-view=card] .lp-episode{width:68vw;min-width:0}\n.lp-series[data-view=horizontal] .lp-resume-row,.lamplay[data-view=vertical] .lp-resume-row,.lamplay[data-view=results] .lp-resume-row{flex-wrap:nowrap;font-size:1em}\n.lp-series[data-view=horizontal] .lp-hero .lp-continue,.lamplay[data-view=vertical] .lp-hero .lp-continue{font-size:.9em}\n.lamplay[data-view=card] .lp-title-slot{height:auto;min-height:2.8em}.lamplay[data-view=card] .lp-title-logo{max-height:3em}\n}\n.lp-control-value{mask-image:none;-webkit-mask-image:none}.lp-control-value.lp-clipped{mask-image:linear-gradient(to right,#000 calc(100% - .8em),transparent);-webkit-mask-image:linear-gradient(to right,#000 calc(100% - .8em),transparent)}\n.lamplay[data-view=vertical] .lp-side,.lamplay[data-view=results] .lp-side{padding:0}\n").appendTo('head');
@@ -2446,6 +2552,23 @@
             '.lp-availability{font-size:.78em;line-height:1.35;margin-top:.4em}.lp-unavailable .lp-episode-meta{color:rgba(255,255,255,.5)}',
             '@media(max-width:900px),(max-height:500px){.lamplay[data-view=horizontal] .lp-hero-content,.lamplay[data-view=vertical] .lp-hero-content{padding:.5em!important}.lamplay[data-view=horizontal] .lp-resume-row,.lamplay[data-view=vertical] .lp-resume-row{flex-wrap:wrap}}',
             '@media(max-width:600px){.lamplay[data-view=horizontal] .lp-resume-row,.lamplay[data-view=vertical] .lp-resume-row{font-size:1em;flex-wrap:nowrap}}'
+        ].join('\n')).appendTo('head');
+        $('<style id="lamplay-010-style"></style>').text([
+            '.lp-vignette-bottom{position:absolute;left:0;right:0;bottom:0;pointer-events:none}',
+            '.lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{align-items:flex-start;padding-top:2em}',
+            '.lp-series[data-view=horizontal] .lamplay__items,.lp-series[data-view=card] .lamplay__items{margin-top:auto;flex-shrink:0;padding-top:.5em;padding-bottom:.3em}',
+            '.lp-series[data-view=horizontal] .lp-episode-info,.lp-series[data-view=card] .lp-episode-info{height:8.9em;min-height:8.9em}',
+            '.lp-series[data-view=horizontal] .lp-unavailable .lp-episode-info,.lp-series[data-view=card] .lp-unavailable .lp-episode-info{height:auto;min-height:0;overflow:visible}',
+            '.lp-series[data-view=horizontal] .lp-unavailable .lamplay__item-title,.lp-series[data-view=card] .lp-unavailable .lamplay__item-title{height:auto;min-height:0;margin-top:.2em}',
+            '.lp-unavailable .lp-picture{background:transparent}.lp-unavailable .lp-picture:after{display:none}.lp-unavailable .lp-progress{background:rgba(255,255,255,.28)}.lp-unavailable .lp-progress i{width:0!important}',
+            '.lp-unavailable .lamplay__item-title{color:rgba(255,255,255,.58)}.lp-unavailable .lp-availability{color:rgba(255,255,255,.5)}',
+            '.lp-series[data-view=horizontal] .lp-unavailable.focus .lp-picture,.lp-series[data-view=card] .lp-unavailable.focus .lp-picture,.lp-series[data-view=horizontal] .lp-unavailable:focus .lp-picture,.lp-series[data-view=card] .lp-unavailable:focus .lp-picture{outline-color:rgba(255,255,255,.45)}',
+            '.lp-series[data-view=vertical] .lp-unavailable,.lp-series[data-view=vertical] .lp-unavailable.focus{background:transparent}',
+            '.lp-series[data-view=vertical] .lp-unavailable.focus,.lp-series[data-view=vertical] .lp-unavailable:focus{box-shadow:0 0 0 .16em rgba(255,255,255,.45)}',
+            '.lamplay[data-view=vertical] .lp-unavailable .lp-episode-meta{display:flex;align-items:center;flex-wrap:wrap;gap:.45em}.lamplay[data-view=vertical] .lp-unavailable .lp-availability{margin:0 0 0 auto;text-align:right;font-size:1em}',
+            '.lp-source-dot{display:inline-block;width:.55em;height:.55em;border-radius:50%;margin-left:.65em;background:#999;vertical-align:middle}.lp-source-dot[data-state=ok]{background:#4caf50}.lp-source-dot[data-state=error]{background:#ef5350}',
+            '.lp-strip,.lp-tools{scroll-behavior:auto}',
+            '@media(max-height:650px){.lp-series[data-view=horizontal] .lp-episode-info,.lp-series[data-view=card] .lp-episode-info{font-size:.8em}}'
         ].join('\n')).appendTo('head');
         var settingsObserver = null;
         function arrangeSettings(body) {
