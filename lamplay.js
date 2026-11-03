@@ -4,8 +4,8 @@
  */
 (function (root) {
     'use strict';
-    var VERSION = '0.10.0';
-    var RELEASE_DATE = '03.11.2026';
+    var VERSION = '0.11.0';
+    var RELEASE_DATE = '04.11.2026';
     var KEY = 'lamplay';
     var NAME = 'LamPlay';
     var PLAY = '<svg class="lp-play" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 3v18l15-9z"/></svg>';
@@ -133,7 +133,7 @@
         var result = {}, key = movieKey(movie);
         Object.keys(object(history)).forEach(function (id) {
             var value = history[id];
-            if (value && /^(kodik|rezka|libria|filmix|cdnvideohub|kinotochka|animedia)$/.test(value.source)) result[id] = { source: value.source, time: +value.time || 0 };
+            if (value && /^(kodik|rezka|libria|filmix|cdnvideohub|kinotochka|animedia|veoveo)$/.test(value.source)) result[id] = { source: value.source, time: +value.time || 0 };
         });
         result[key] = { source: source, time: timestamp || Date.now() };
         Object.keys(result).sort(function (a, b) { return result[b].time - result[a].time; }).slice(500)
@@ -347,6 +347,7 @@
                 var status = xhr && xhr.status;
                 var message = reason === 'timeout' ? 'Источник не ответил вовремя.' : status ? 'Источник вернул HTTP ' + status + '.' :
                     'Не удалось прочитать ответ '+origin(url)+'. Браузер мог заблокировать запрос, либо сайт недоступен. Проверьте доступность источника и зеркало.';
+                if(!status && /(?:rezka|hdrezka)\./i.test(origin(url)))message+=' HDrezka: смена пароля не устранит сетевой отказ. В обычном браузере также требуются разрешённые межсайтовые запросы и cookies; проверьте другое зеркало.';
                 end(new Error(message));
             }, data ? form(data) : false, params);
         };
@@ -742,7 +743,7 @@
                 if(Array.isArray(data))data.forEach(function(ep){add(ep.voiceover,0,1,ep);});
                 else if(data && typeof data==='object')Object.keys(data).forEach(function(title){var seasons=data[title];if(!seasons || typeof seasons!=='object')return;Object.keys(seasons).forEach(function(key){var season=seasons[key];if(!season || !season.episodes)return;Object.keys(season.episodes).forEach(function(key){var ep=season.episodes[key];add(title,+season.season || +(String(key).match(/\d+/)||[])[0] || 1,+ep.episode || +(String(key).match(/\d+/)||[])[0] || 1,ep);});});});
                 if(!rows.length)return fail(new Error('FilmixTV: нет доступных видеоссылок для этой записи.'));
-                done({id:result.id,title:result.title,series:rows[0].season!=='0',voices:voices,rows:rows,maxHeight:maxHeight,transport:'tv'});
+                done({id:result.id,title:result.title,series:rows[0].season!=='0',voices:voices,rows:rows,maxHeight:480,transport:'tv'});
             },fail);
         }
 
@@ -767,7 +768,7 @@
                 if(preferTV())tvOpen(result,done,function(tvError){openPost(result,done,function(){fail(tvError);});});
                 else openPost(result,done,function(mobileError){tvOpen(result,done,function(){fail(mobileError);});});
             }
-            if(settings('filmix_token','')) return provider.profile(open,function(){maxHeight=480;open();});
+            if(!preferTV() && settings('filmix_token','')) return provider.profile(open,function(){maxHeight=480;open();});
             maxHeight=480;open();
         };
         function openPost(result,done,fail,retried){api('post/'+encodeURIComponent(result.id),retried?{_lp_retry:Date.now()}:{},function(data){
@@ -783,7 +784,7 @@
         },function(e){if(!retried && /HTTP (404|50\d)/.test(safeError(e)))return openPost(result,done,fail,true);fail(e);});};
         this.episodes=function(release,voice,done){done(release.rows.filter(function(e){return e.voice.id===String(voice.id);}));};
         this.resolve=function(release,ep,done,fail){
-            if(ep.data.tvFiles){var q={};list(ep.data.tvFiles).forEach(function(f){var url=absolute(f.url),h=+f.quality;if(url && h>0 && h<=(release.maxHeight || maxHeight))q[h+'p']=url;});if(!Object.keys(q).length)return fail(new Error('FilmixTV: нет видеоссылок в доступном качестве.'));return done({quality:q,subtitles:[]});}
+            if(ep.data.tvFiles){var q={};list(ep.data.tvFiles).forEach(function(f){var url=absolute(f.url),h=+f.quality;if(url && h>0 && h<=Math.min(480,release.maxHeight || 480))q[h+'p']=url;});if(!Object.keys(q).length)return fail(new Error('FilmixTV: нет видеоссылок в доступном качестве.'));return done({quality:q,subtitles:[]});}
             var file=ep.data.link || '',quality={},match=file.match(/\[([\d,]+)\]/),heights=match?match[1].split(','):list(ep.data.qualities);
             heights.map(Number).filter(function(n){return n>0 && n<=(release.maxHeight || maxHeight);}).forEach(function(h){var u=absolute(file.replace(/\[[\d,]+\]|%s/,String(h)));if(u) quality[h+'p']=u;});
             // Public guest access is limited to 480p; account-only qualities are not advertised.
@@ -863,18 +864,31 @@
     var veoIndexCache={};
     function VeoVeo(io,settings){
         this.id='veoveo';this.title='VeoVeo';
-        function base(){return hostSetting(settings('veoveo_host',''),'https://api.rstprgapipt.com');}
+        var activeHost='';
+        function bases(){var preferred=hostSetting(settings('veoveo_host',''),'https://api.rstprgapipt.com'),hosts=[activeHost || preferred];if(flag(settings('veoveo_fallback',true),true) && ['https://api.rstprgapipt.com','https://tazaromikaz.link'].indexOf(preferred)>=0)hosts=hosts.concat([preferred,'https://api.rstprgapipt.com','https://tazaromikaz.link']);return hosts.filter(function(h,i,a){return a.indexOf(h)===i;});}
         function bucket(key){var n=0;for(var i=0;i<key.length;i++)n=(n*31+key.charCodeAt(i))%32;return n;}
-        function catalog(id,done,fail){io.request(base()+'/balancer-api/proxy/playlists/catalog-api/episodes?content-id='+encodeURIComponent(id),null,'json',function(data){if(!Array.isArray(data) || !data.length)return fail(new Error('VeoVeo: источник вернул пустой плейлист.'));done(data);},fail);}
+        function catalog(id,done,fail){var hosts=bases(),errors=[];
+            function next(){var host=hosts.shift();if(!host)return fail(new Error('VeoVeo: API не вернул список видео. '+errors.join(' / ')));
+                io.request(host+'/balancer-api/proxy/playlists/catalog-api/episodes?content-id='+encodeURIComponent(id),null,'json',function(data){if(!Array.isArray(data) || !data.length){errors.push(origin(host)+': пустой плейлист');next();return;}activeHost=host;done(data);},function(e){errors.push(origin(host)+': '+safeError(e));next();});
+            }next();
+        }
         this.check=function(done,fail){catalog(15652,done,fail);};
         this.search=function(query,movie,done,fail){
-            var key='t:'+normal(query),kp=movie.kinopoisk_id || movie.kinopoiskId || movie.kp_id || (movie.source==='kinopoisk'?movie.id:''),imdb=movie.imdb_id;
-            if([movie.title,movie.name,movie.original_title,movie.original_name].some(function(t){return normal(t)===normal(query);})){if(kp)key='kp:'+kp;else if(imdb)key='imdb:'+imdb;}
-            var shard=bucket(key);
-            function found(index){var rows=index[key] || [],year=String(movie.release_date || movie.first_air_date || '').slice(0,4),same=rows.filter(function(r){return year && String(r[1])===year;});if(same.length)rows=same;
-                done(rows.map(function(r){return{id:r[0],title:query,year:r[1] || '',widget:rows.length===1};}));}
-            if(veoIndexCache[shard])return found(veoIndexCache[shard]);
-            io.request('https://water-faq.github.io/LamPlay/data/veoveo/'+shard+'.json',null,'json',function(data){if(!data || Array.isArray(data) || typeof data!=='object')return fail(new Error('VeoVeo: не удалось прочитать индекс каталога.'));veoIndexCache[shard]=data;found(data);},fail);
+            var keys=[],kp=movie.kinopoisk_id || movie.kinopoiskId || movie.kp_id || (movie.source==='kinopoisk'?movie.id:''),imdb=movie.imdb_id;
+            var matches=[movie.title,movie.name,movie.original_title,movie.original_name].some(function(t){return normal(t)===normal(query);});
+            if(matches){if(kp)keys.push('kp:'+kp);if(imdb)keys.push('imdb:'+imdb);}
+            keys.push('t:'+normal(query));if(matches)[movie.original_name,movie.original_title,movie.name,movie.title].forEach(function(t){if(t)keys.push('t:'+normal(t));});
+            keys=keys.filter(function(k,i,a){return a.indexOf(k)===i;});
+            function next(){var key=keys.shift();if(!key)return fail(new Error('VeoVeo: в справочнике нет соответствия для этого произведения. Это не подтверждает отсутствие видео у источника.'));
+                var shard=bucket(key);
+                function found(index){var rows=index[key] || [],year=String(movie.release_date || movie.first_air_date || '').slice(0,4),same=rows.filter(function(r){return year && String(r[1])===year;});if(same.length)rows=same;
+                    else if(key.indexOf('t:')===0 && year)rows=rows.filter(function(r){return !r[1];});
+                    if(!rows.length)return next();
+                    done(rows.map(function(r){return{id:r[0],title:query,year:r[1] || '',widget:rows.length===1};}));
+                }
+                if(veoIndexCache[shard])return found(veoIndexCache[shard]);
+                io.request('https://water-faq.github.io/LamPlay/data/veoveo/'+shard+'.json?v=1',null,'json',function(data){if(!data || Array.isArray(data) || typeof data!=='object')return fail(new Error('VeoVeo: не удалось прочитать справочник каталога.'));veoIndexCache[shard]=data;found(data);},fail);
+            }next();
         };
         this.open=function(result,done,fail){catalog(result.id,function(data){var rows=[],voices=[],seen={};data.forEach(function(ep){list(ep.episodeVariants).forEach(function(v){var url=absolute(v.filepath),title=v.title && v.title!=='DEFAULT'?v.title:'Озвучка источника';if(!url)return;var id=title;if(!seen[id]){seen[id]=true;voices.push({id:id,title:title});}rows.push({season:String(ep.season && ep.season.order || 0),number:String(ep.order || 1),title:ep.title || 'Эпизод '+(ep.order || 1),duration:v.duration,image:absolute(v.previewImageFilepath),voice:{id:id,title:title},data:url});});});if(!rows.length)return fail(new Error('VeoVeo: в плейлисте нет видеоссылок.'));done({id:result.id,title:result.title,series:rows.some(function(ep){return +ep.season>0;}),voices:voices,rows:rows});},fail);};
         this.episodes=function(release,voice,done){done(release.rows.filter(function(ep){return ep.voice.id===voice.id;}));};
@@ -1171,15 +1185,10 @@
             }
             function releaseBackground() { lastBackground='';$('body').removeClass('lp-active lp-card-background');if(nativeBackground) nativeBackground.detach();vignette.detach(); }
             function fitEpisodeGeometry(){
-                if(view()==='vertical' || !series() || !html[0].isConnected || bodyPane[0].clientHeight<50)return;
-                var stamp=[view(),root.innerWidth,root.innerHeight,bodyPane[0].clientHeight,body.children().length].join('|');if(stamp===geometryStamp)return;geometryStamp=stamp;
-                var cards=body.find('.lp-episode'),pictures=cards.find('.lp-picture');cards.css('width','');pictures.css('height','');
-                if(root.innerWidth<=900 || root.innerHeight<=500)return;
-                var pane=bodyPane[0],style=root.getComputedStyle(pane),space=pane.clientHeight-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom)-36,overhead=0;
-                cards.each(function(){var picture=$(this).find('.lp-picture')[0];if(picture)overhead=Math.max(overhead,this.offsetHeight-picture.offsetHeight);});
-                var first=pictures[0];if(!first)return;var h=first.offsetHeight,limit=Math.max(24,space-overhead);
-                if(limit<h){cards.each(function(){var w=this.offsetWidth;$(this).css('width',Math.max(48,w*limit/h)+'px');});pictures.css('height',limit+'px');}
-                pane.scrollTop=0;
+                // Card width belongs to the horizontal layout, never to leftover height.
+                // Keep native vertical scrolling on short screens instead of shrinking thumbnails.
+                if(view()==='vertical' || !html[0].isConnected)return;
+                body.find('.lp-episode').css('width','').find('.lp-picture').css('height','');
             }
             function fitStrip() {top.css('min-height','');setTimeout(function(){if(destroyed)return;html.find('.lp-control-value').each(function(){$(this).toggleClass('lp-clipped',this.scrollWidth>this.clientWidth+1);});},0);}
             function resized(){clearTimeout(resizeTimer);resizeTimer=setTimeout(function(){if(!destroyed){layout();fitEpisodeGeometry();if(last && html[0].contains(last))focusNode(last);}},100);}
@@ -1347,9 +1356,47 @@
                     if(previous){['time','duration','percent'].forEach(function(k){view[k]=+previous[k]||0;});if(view.handler)view.handler(view.percent,view.time,view.duration);}
                 }
                 migratedProgress[hash]=true;
+                var registry=object(setting('episode_registry',{})),known=object(registry[key]);
+                if(!known[hash]){known[hash]={season:ep.season,number:ep.number};registry[key]=known;save('episode_registry',registry);}
                 return view;
             }
-            function started(ep){return !!object(setting('started',{}))[episodeHash(movie,ep.season,ep.number,series(),Lampa.Utils.hash)];}
+            function started(ep){return object(setting('started',{}))[episodeHash(movie,ep.season,ep.number,series(),Lampa.Utils.hash)];}
+            function isStarted(ep,p){var mark=started(ep);return mark===false?false:!!mark || +p.time>0 || +p.percent>0;}
+            function setMark(ep,value){var marks=object(setting('started',{}));marks[episodeHash(movie,ep.season,ep.number,series(),Lampa.Utils.hash)]=value?Date.now():false;save('started',marks);}
+            function resetTime(ep){var p=progress(ep);if(p.handler)p.handler(0,0,0);migratedProgress[p.hash]=true;var resumes=object(setting('resume',{})),r=resumes[key];if(r && String(r.season)===String(ep.season) && String(r.number)===String(ep.number)){r.time=0;r.duration=0;r.percent=0;save('resume',resumes);}}
+            function workEpisodes(){
+                var found={},out=[],registry=object(object(setting('episode_registry',{}))[key]);
+                function add(ep){var hash=episodeHash(movie,ep.season,ep.number,series(),Lampa.Utils.hash);if(!found[hash]){found[hash]=true;out.push(ep);}}
+                Object.keys(registry).forEach(function(h){add(registry[h]);});episodes.forEach(add);list(release.rows).forEach(add);list(release.episodes).forEach(add);
+                list(metadata.details.seasons).forEach(function(season){var n=Math.min(10000,+season.episode_count || 0);for(var i=1;i<=n;i++)add({season:String(season.season_number),number:String(i)});});
+                Object.keys(metadata.seasons).forEach(function(season){list(metadata.seasons[season]).forEach(function(ep){add({season:String(ep.season_number || season),number:String(ep.episode_number)});});});
+                if(Lampa.Timeline && Lampa.Timeline.filename && Lampa.Timeline.link){var card=Object.assign({},movie);if(series())card.original_name=card.original_name || card.original_title || card.name || card.title;
+                    var current=Lampa.Timeline.link(card,1,1),stored=object(Lampa.Storage.get(Lampa.Timeline.filename(),{}));
+                    Object.keys(stored).forEach(function(hash){var t=stored[hash];if(current && t && t.card===current.card){if(series())add({season:String(t.season),number:String(t.episode)});else add({season:'',number:''});}});
+                }return out;
+            }
+            function episodeActions(ep){
+                if(busy)return;
+                var restore=streamKey(ep),items=[{title:'Воспроизведение',separator:true}];
+                function add(title,id){items.push({title:title,value:id});}
+                if(Lampa.Platform && Lampa.Platform.is('webos'))add('Запустить плеер — WebOS','webos');
+                add('Запустить плеер — Lampa','lampa');items.push({title:'Выбранное',separator:true});
+                add('Пометить','mark');add('Снять отметку','unmark');add('Сбросить тайм-код','reset');add('Копировать ссылку на видео','copy');items.push({title:'Общие',separator:true});
+                if(series() && Lampa.Api && typeof Lampa.Api.subscribeToTranslation==='function')add('Подписаться на озвучку','subscribe');
+                add('Очистить все метки','clear_marks');add('Очистить все тайм-коды','clear_times');
+                function back(){self.start();}
+                function refresh(){renderEpisodes(restore);}
+                function clear(id){workEpisodes().forEach(function(e){if(id==='clear_marks')setMark(e,false);else resetTime(e);});refresh();}
+                Lampa.Select.show({title:'Действие',items:items,onBack:back,onSelect:function(item){
+                    if(item.separator)return;
+                    if(item.value==='webos' || item.value==='lampa'){back();play(ep,false,item.value);return;}
+                    if(item.value==='mark' || item.value==='unmark'){setMark(ep,item.value==='mark');refresh();return;}
+                    if(item.value==='reset'){resetTime(ep);refresh();return;}
+                    if(item.value==='clear_marks' || item.value==='clear_times')return Lampa.Select.show({title:item.title+' — только это произведение?',items:[{title:'Отмена',value:'cancel'},{title:'Очистить',value:'confirm'}],onBack:back,onSelect:function(answer){if(answer.value==='confirm')clear(item.value);else back();}});
+                    if(item.value==='subscribe'){back();Lampa.Api.subscribeToTranslation({card:movie,voice:voiceOf(ep).title,season:+ep.season,episode:+ep.number},function(){Lampa.Noty.show('Подписка на озвучку оформлена.');},function(){Lampa.Noty.show('Не удалось оформить подписку. Проверьте вход в аккаунт CUB и доступность уведомлений.');});return;}
+                    if(item.value==='copy'){begin('Получаем ссылку…');var target=cell(ep);resolveCell(target,function(){finish();if(Lampa.Utils.copyTextToClipboard)Lampa.Utils.copyTextToClipboard(target.url,function(){Lampa.Noty.show('Ссылка на видео скопирована.');back();},function(){Lampa.Noty.show('Не удалось скопировать ссылку в этом браузере.');back();});else{Lampa.Noty.show('Копирование недоступно в этой версии Lampa.');back();}},failed,false);}
+                }});
+            }
             function markStarted(ep){if(ep.unavailable)return;var items=object(setting('started',{})),hash=episodeHash(movie,ep.season,ep.number,series(),Lampa.Utils.hash);items[hash]=Date.now();var keys=Object.keys(items).sort(function(a,b){return items[b]-items[a];});keys.slice(2000).forEach(function(k){delete items[k];});save('started',items);}
             function snapshot(ep,view) {
                 var r=resultSelected, storedResult={};
@@ -1408,7 +1455,8 @@
                     var v=voiceOf(ep), m=series()?detailFor(ep):metadata.details, p=progress(ep);
                     var node=interactive($('<div class="lamplay__item lp-episode"></div>'),function () {play(ep);});
                     node[0]._lpEpisodeKey=streamKey(ep);
-                    var picture=$('<div class="lp-picture"></div>');node.toggleClass('lp-started',!ep.unavailable && (started(ep) || +p.time>0 || +p.percent>0));picture.append($('<span class="lp-focus-play"></span>').append(PLAY));
+                    node.on('hover:long',function(){episodeActions(ep);});
+                    var picture=$('<div class="lp-picture"></div>');node.toggleClass('lp-started',isStarted(ep,p));picture.append($('<span class="lp-focus-play"></span>').append(PLAY));
                     var img=series()?thumbnail(ep):'';
                     if (img) picture.append(setImage($('<img alt="" loading="lazy">'),img));
                     if (series()) picture.append($('<span class="lp-episode-number"></span>').text('S'+ep.season+':E'+ep.number));
@@ -1440,7 +1488,10 @@
                         picture.append($('<span class="lp-unavailable-number"></span>').text(('0'+ep.number).slice(-Math.max(2,String(ep.number).length))));
                         info.find('.lp-watched,.lp-quality-meta,.lp-description').remove();info.find('.lp-progress i').css('width','0%');info.find('.lamplay__item-title').text(m.name || 'Эпизод '+ep.number);
                         var availabilityNode=$('<div class="lp-availability"></div>').text(notice);
-                        if(view()==='vertical')meta.append(availabilityNode);else info.append(availabilityNode);
+                        if(view()==='vertical')meta.append(availabilityNode);else {
+                            var heading=$('<div class="lp-unavailable-heading"></div>');
+                            heading.append(info.find('.lamplay__item-title'),meta.find('.lp-air-date'));meta.remove();info.prepend(heading);info.append(availabilityNode);
+                        }
                         return;
                     }
                     var task={ep:ep,node:node,badge:badge,qualityMeta:qualityMeta,ticket:ticket,source:source.id,key:streamKey(ep),release:release};node[0]._lpProbe=task;
@@ -1484,21 +1535,21 @@
                 return {_lpNextTitle:series()?episodeName(ep):v.title,title:series()?(flag(setting('full_episode_title',true),true)?'[S'+ep.season+':E'+ep.number+'] '+episodeName(ep):'Серия '+ep.number):v.title,
                     thumbnail:series()?thumbnail(ep):undefined,card:movie,timeline:view,
                     season:series()?+ep.season:undefined,episode:series()?+ep.number:undefined,
-                    _lamplay:state,_lpEpisode:ep,subtitles:false};
+                    hls_type:source.id==='filmix'?(setting('filmix_hls','auto')==='auto'?(Lampa.Platform.is('webos') && root.MediaSource && root.MediaSource.isTypeSupported && root.MediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E,mp4a.40.2"')?'hlsjs':undefined):setting('filmix_hls','auto')):undefined,_lamplay:state,_lpEpisode:ep,subtitles:false};
             }
-            function resolveCell(item,done,fail) {
+            function resolveCell(item,done,fail,mark) {
                 var ep=item._lpEpisode, hit=cache[streamKey(ep)];
                 function ready(streams) {
-                    try {streams=prepareStreams(streams,setting);item.url=chooseQuality(streams.quality,setting('quality','1080'));item.quality=streams.quality;item.subtitles=streams.subtitles && streams.subtitles.length?streams.subtitles:false;if (!item.url) throw new Error('Нет доступного видеопотока.');markStarted(ep);var previous=Lampa.Storage.field?Lampa.Storage.field('video_quality_default'):Lampa.Storage.get('video_quality_default',1080),chosen=Object.keys(item.quality).filter(function(k){return item.quality[k]===item.url;})[0];
+                    try {streams=prepareStreams(streams,setting);item.url=chooseQuality(streams.quality,setting('quality','1080'));item.quality=streams.quality;item.subtitles=streams.subtitles && streams.subtitles.length?streams.subtitles:false;if (!item.url) throw new Error('Нет доступного видеопотока.');if(mark!==false)markStarted(ep);var previous=Lampa.Storage.field?Lampa.Storage.field('video_quality_default'):Lampa.Storage.get('video_quality_default',1080),chosen=Object.keys(item.quality).filter(function(k){return item.quality[k]===item.url;})[0];
                     try{Lampa.Storage.set('video_quality_default',qualityNumber(chosen));done();}finally{Lampa.Storage.set('video_quality_default',previous);}}
                     catch(e) {fail(e);}
                 }
                 if (hit && Date.now()-hit.time<60000) ready(hit.streams);else source.resolve(release,ep,ready,fail);
             }
-            function play(ep,resuming) {
+            function play(ep,resuming,player) {
                 if (busy) return;
                 if(ep.unavailable){Lampa.Noty.show(availability(detailFor(ep).air_date) || 'Серия недоступна в данной озвучке');return;}
-                begin('Получаем видеопоток…',function () {play(ep,resuming);});
+                begin('Получаем видеопоток…',function () {play(ep,resuming,player);});
                 var items=episodes.filter(function (e) {return !e.loadSeason && !e.unavailable && (!series() || !season || String(e.season)===season);}).slice();
                 if (series()) items.sort(function (a,b) {return +a.season-+b.season || +a.number-+b.number;});
                 var playlist=items.map(cell), index=items.indexOf(ep), first=playlist[index];
@@ -1508,7 +1559,8 @@
                     markStarted(ep);saveSource(movie,source.id);record(first._lamplay);finish();renderHero();
                     if (movie.id && Lampa.Favorite) Lampa.Favorite.add('history',movie,100);
                     if (resuming && first.timeline.time>0) { first._lpResumeAt=first.timeline.time;first.timeline.percent=0; }
-                    Lampa.Player.play(first);Lampa.Player.playlist(playlist);
+                    if(player && Lampa.Player.runas)Lampa.Player.runas(player);
+                    try{Lampa.Player.play(first);Lampa.Player.playlist(playlist);}finally{if(player && Lampa.Player.runas)Lampa.Player.runas(false);}
 
                 },failed);
             }
@@ -2504,12 +2556,15 @@
             },function(e){if(!closed)modal.find('.broadcast__device').text(safeError(e));});
         });
         Lampa.SettingsApi.addParam({component:filmixMenu,param:{name:KEY+'_filmix_status',type:'button'},field:{name:'Статус Filmix'},onRender:function(item){filmixStatusItem=item;if(!item.find('.settings-param__value').length)item.append('<div class="settings-param__value"></div>');item.find('.settings-param__value').text(setting('filmix_status','Не авторизован'));}});
-        param('filmix_route','select','Подключение Filmix','auto',{auto:'Автоматически',tv:'FilmixTV (HTTPS)',mobile:'Мобильный API'},'В браузере автоматически используется FilmixTV; мобильный API сохраняет привязку устройства.',filmixMenu);
+        param('filmix_route','select','Подключение Filmix','auto',{auto:'Автоматически',tv:'FilmixTV (HTTPS)',mobile:'Мобильный API'},'В браузере используется FilmixTV с публичными ссылками до 480p. Привязка и качество аккаунта относятся к мобильному API.',filmixMenu);
+        param('filmix_hls','select','Обработка HLS Filmix','auto',{auto:'Автоматически',hlsjs:'Программная (HLS.js)',native:'Системная'},'На LG при поддержке MediaSource автоматически используется HLS.js. Если поток не запускается, попробуйте системную обработку.',filmixMenu);
         param('filmix_host','input','Filmix - адрес API','http://filmixapp.cyou','','Адрес сервиса API. Для HTTP-адреса сама Lampa также должна быть открыта по HTTP.',filmixMenu);
         buttonParam(filmixMenu,'filmix_api_mirrors','Выбрать адрес API Filmix',function(){var hosts=['http://filmixapp.cyou','http://filmixapp.vip','http://fxapp.biz'];Lampa.Select.show({title:'Адрес API Filmix',items:hosts.map(function(host){return{title:host,value:host,selected:host===setting('filmix_host','http://filmixapp.cyou')};}),onSelect:function(item){save('filmix_host',item.value);sourceHealth={};Lampa.Noty.show('Адрес Filmix сохранён. Повторно откройте источник.');Lampa.Controller.toggle('settings_component');},onBack:function(){Lampa.Controller.toggle('settings_component');}});},'Альтернативные адреса мобильного API. Смена адреса не снимает ограничения браузера.');
         Lampa.SettingsApi.addParam({component:filmixMenu,param:{name:KEY+'_filmix_token',type:'input',default:'',values:''},field:{name:'Токен устройства Filmix',description:'Сохраняется автоматически после привязки устройства.'},onRender:function(item){filmixTokenItem=item;},onChange:function(){filmixStatus(null);}});
         param('filmix_device_id','input','Идентификатор устройства',setting('filmix_device_id',''),'','Сохраняется между запусками. Для токена укажите связанный с ним идентификатор устройства.',filmixMenu);
         buttonParam(filmixMenu,'filmix_profile','Проверить доступ аккаунта',function(){var network=new Transport(Lampa,setting);new Filmix(network,setting).profile(function(p){Lampa.Noty.show('Filmix: '+filmixStatus(p));},function(e){Lampa.Noty.show(safeError(e));});},'Проверяет токен прямым запросом к API Filmix.');
+        param('veoveo_fallback','trigger','Резервный API VeoVeo',true,undefined,'При ошибке автоматически проверяет второй из известных адресов. Пользовательский адрес не заменяется.',extraMenu);
+        buttonParam(extraMenu,'veoveo_api_mirrors','Выбрать адрес API VeoVeo',function(){var hosts=['https://api.rstprgapipt.com','https://tazaromikaz.link'];Lampa.Select.show({title:'Адрес API VeoVeo',items:hosts.map(function(h){return{title:h,value:h,selected:h===setting('veoveo_host',hosts[0])};}),onSelect:function(i){save('veoveo_host',i.value);sourceHealth={};Lampa.Noty.show('Адрес VeoVeo сохранён. Повторно откройте источник.');Lampa.Controller.toggle('settings_component');},onBack:function(){Lampa.Controller.toggle('settings_component');}});},'Два адреса проверены до получения JSON-каталога; воспроизведение на LG проверяется отдельно.');
         param('veoveo_host','input','VeoVeo - адрес API','https://api.rstprgapipt.com','','Каталог и видео запрашиваются напрямую. В браузере доступ зависит от разрешений API источника.',extraMenu);
         param('kinotochka_host','input','KinoTochka - сайт','https://kinovibe.cc','','Прямые запросы требуют поддержки сайтом CORS либо нативных запросов устройства.',extraMenu);
         param('animedia_host','input','AniMedia - сайт','https://amd.online','','Собственный плеер AniMedia. Некоторые релизы используют другие плееры и недоступны.',extraMenu);
@@ -2555,7 +2610,7 @@
         ].join('\n')).appendTo('head');
         $('<style id="lamplay-010-style"></style>').text([
             '.lp-vignette-bottom{position:absolute;left:0;right:0;bottom:0;pointer-events:none}',
-            '.lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{align-items:flex-start;padding-top:2em}',
+            '.lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{align-items:flex-start;padding-top:1.3em;padding-bottom:1.2em}',
             '.lp-series[data-view=horizontal] .lamplay__items,.lp-series[data-view=card] .lamplay__items{margin-top:auto;flex-shrink:0;padding-top:.5em;padding-bottom:.3em}',
             '.lp-series[data-view=horizontal] .lp-episode-info,.lp-series[data-view=card] .lp-episode-info{height:8.9em;min-height:8.9em}',
             '.lp-series[data-view=horizontal] .lp-unavailable .lp-episode-info,.lp-series[data-view=card] .lp-unavailable .lp-episode-info{height:auto;min-height:0;overflow:visible}',
@@ -2568,6 +2623,13 @@
             '.lamplay[data-view=vertical] .lp-unavailable .lp-episode-meta{display:flex;align-items:center;flex-wrap:wrap;gap:.45em}.lamplay[data-view=vertical] .lp-unavailable .lp-availability{margin:0 0 0 auto;text-align:right;font-size:1em}',
             '.lp-source-dot{display:inline-block;width:.55em;height:.55em;border-radius:50%;margin-left:.65em;background:#999;vertical-align:middle}.lp-source-dot[data-state=ok]{background:#4caf50}.lp-source-dot[data-state=error]{background:#ef5350}',
             '.lp-strip,.lp-tools{scroll-behavior:auto}',
+            '.lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{overflow-y:auto}',
+            '.lp-series[data-view=horizontal] .lp-episode,.lp-series[data-view=card] .lp-episode{flex-shrink:0}',
+            '.lp-unavailable-heading{display:flex;align-items:baseline;justify-content:space-between;gap:.5em;min-width:0}.lp-unavailable-heading .lamplay__item-title{flex:1;min-width:0}.lp-unavailable-heading .lp-air-date{flex:none;font-size:.72em;white-space:nowrap}',
+            '.lamplay[data-view=vertical] .lp-unavailable .lp-episode-meta{width:100%;padding-right:0}.lamplay[data-view=vertical] .lp-unavailable .lp-availability{flex:1;text-align:right;white-space:nowrap}',
+            '.lp-series[data-view=horizontal] .lp-episode-info,.lp-series[data-view=card] .lp-episode-info{height:7.8em;min-height:7.8em;overflow:visible}.lp-series[data-view=horizontal] .lp-description,.lp-series[data-view=card] .lp-description{height:3.3em;overflow:hidden}',
+
+            '@media(min-width:901px) and (max-height:650px){.lp-series[data-view=horizontal] .lp-episode-info,.lp-series[data-view=card] .lp-episode-info{height:7em;min-height:7em}.lp-series[data-view=horizontal] .lp-description,.lp-series[data-view=card] .lp-description{height:2.6em;-webkit-line-clamp:2}}',
             '@media(max-height:650px){.lp-series[data-view=horizontal] .lp-episode-info,.lp-series[data-view=card] .lp-episode-info{font-size:.8em}}'
         ].join('\n')).appendTo('head');
         var settingsObserver = null;
