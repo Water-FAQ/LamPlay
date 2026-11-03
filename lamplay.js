@@ -1,12 +1,13 @@
-/* LamPlay by WaterFAQ — 0.4.0 (experimental)
+/* LamPlay by WaterFAQ — 0.5.0 (experimental)
  * Independent Lampa plugin. Direct connections only; no proxy or remote code execution.
- * Providers: Kodik, HDrezka, AniLibria / AniLiberty.
+ * Providers: HDrezka, Kodik, AniLiberty, Filmix, KinoTochka, AniMedia.
  */
 (function (root) {
     'use strict';
-    var VERSION = '0.4.0';
+    var VERSION = '0.5.0';
     var KEY = 'lamplay';
     var NAME = 'LamPlay';
+    var PLAY = '<svg class="lp-play" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 3v18l15-9z"/></svg>';
     // Selected L + Play mark: matching stroke widths and triangle inside L bounds.
     var LOGO = '<svg class="lamplay-logo" xmlns="http://www.w3.org/2000/svg" viewBox="5 5 54 54" aria-hidden="true"><path fill="currentColor" d="M13 12h7v34h32v7H13zM28 12l24 16-24 16z"/></svg>';
 
@@ -663,21 +664,21 @@
     }
 
     function Libria(io, settings) {
-        this.id = 'libria'; this.title = 'AniLibria';
-        function base() { return hostSetting(settings('libria_host', ''), 'https://api.anilibria.app') + '/api/v1/'; }
+        this.id = 'libria'; this.title = 'AniLiberty';
+        function base() { return hostSetting(settings('libria_host', ''), 'https://aniliberty.top') + '/api/v1/'; }
         this.search = function (query, movie, done, fail) {
             io.request(base() + 'app/search/releases?query=' + encodeURIComponent(query), null, 'json', function (rows) {
-                if (!Array.isArray(rows)) return fail(new Error('AniLibria: неожиданный формат поиска.'));
+                if (!Array.isArray(rows)) return fail(new Error('AniLiberty: неожиданный формат поиска.'));
                 done(rank(rows.map(function (row) { return { id: row.id, title: row.name && row.name.main || row.alias,
                     original: row.name && row.name.english, year: row.year, description: 'Серий: ' + (row.episodes_total || '—') }; }), movie));
             }, fail);
         };
         this.open = function (result, done, fail) {
             io.request(base() + 'anime/releases/' + encodeURIComponent(result.id), null, 'json', function (release) {
-                if (!release || typeof release !== 'object') return fail(new Error('AniLibria: неожиданный ответ релиза.'));
-                if (release.is_blocked_by_geo || release.is_blocked_by_copyrights) return fail(new Error('AniLibria сообщила об ограничении доступа к релизу.'));
+                if (!release || typeof release !== 'object') return fail(new Error('AniLiberty: неожиданный ответ релиза.'));
+                if (release.is_blocked_by_geo || release.is_blocked_by_copyrights) return fail(new Error('AniLiberty сообщила об ограничении доступа к релизу.'));
                 var episodes = list(release.episodes).slice().sort(function (a, b) { return +a.ordinal - +b.ordinal; });
-                done({ id: result.id, title: result.title, episodes: episodes, voices: [{ id: 'libria', title: 'AniLibria' }] });
+                done({ id: result.id, title: result.title, episodes: episodes, voices: [{ id: 'libria', title: 'AniLiberty' }] });
             }, fail);
         };
         this.episodes = function (release, voice, done) {
@@ -693,6 +694,105 @@
             if (!Object.keys(map).length) return fail(new Error('Для этой серии ещё нет видеопотока.'));
             done({ quality: map, subtitles: [] });
         };
+    }
+
+    // Plain-text playlists are parsed as data; provider scripts are never evaluated.
+    function playerFile(html) {
+        var m=String(html).match(/\bfile\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/);
+        if(!m) throw new Error('На странице нет открытого видеопотока.');
+        if(m[1][0]==='"') return JSON.parse(m[1]);
+        return m[1].slice(1,-1).replace(/\\\//g,'/').replace(/\\'/g,"'").replace(/\\\\/g,'\\');
+    }
+    function hlsQualities(text,url) {
+        var rows=String(text).split(/\r?\n/),quality={};
+        rows.forEach(function(row,i){var m=row.match(/RESOLUTION=\d+x(\d+)/);if(m) {for(var n=i+1;n<rows.length;n++) {if(!rows[n].trim() || rows[n][0]==='#') continue;var u=absolute(rows[n],url);if(u) quality[m[1]+'p']=u;break;}}});
+        return Object.keys(quality).length?quality:{auto:url};
+    }
+    function openStream(io,file,base,done,fail) {
+        var quality={},pairs=labelledLinks(file,true);
+        pairs.forEach(function(p){if(p.url) quality[p.label || 'auto']=p.url;});
+        var url=absolute(file,base);
+        if(!Object.keys(quality).length && url) quality.auto=url;
+        if(!Object.keys(quality).length) return fail(new Error('Источник не предоставил открытый видеопоток.'));
+        if(Object.keys(quality).length===1 && url && /\.m3u8(?:\?|$)/i.test(url)) {
+            return io.request(url,null,'text',function(text){if(!/^\s*#EXTM3U/.test(text)) return fail(new Error('Источник вернул неверный HLS-плейлист.'));done({quality:hlsQualities(text,url),subtitles:[]});},fail);
+        }
+        done({quality:quality,subtitles:[]});
+    }
+    function Filmix(io,settings) {
+        this.id='filmix';this.title='Filmix';
+        var dev=Array(17).join('0').replace(/0/g,function(){return Math.floor(Math.random()*16).toString(16);});
+        function api(path,params,done,fail) {
+            var host=hostSetting(settings('filmix_host',''),'http://filmixapp.cyou');
+            var query={user_dev_id:dev,user_dev_name:'Xiaomi',user_dev_token:'aaaabbbbccccddddeeeeffffaaaabbbb',user_dev_vendor:'Xiaomi',user_dev_os:'14',user_dev_apk:'2.2.0',app_lang:'ru-rRU'};
+            Object.keys(params||{}).forEach(function(k){query[k]=params[k];});
+            io.request(host+'/api/v2/'+path+'?'+form(query),null,'json',done,fail,{headers:{'User-Agent':'okhttp/3.10.0'}});
+        }
+        this.search=function(query,movie,done,fail){api('search',{story:query},function(rows){
+            if(!Array.isArray(rows)) return fail(new Error('Filmix: поиск недоступен.'));
+            done(rank(rows.map(function(r){return {id:r.id,title:r.title,original:r.original_title,year:r.year,description:r.short_story};}),movie));
+        },fail);};
+        this.open=function(result,done,fail){api('post/'+encodeURIComponent(result.id),{},function(data){
+            var links=data && data.player_links;
+            if(!links) return fail(new Error('Filmix: у произведения нет доступного гостевого плейлиста.'));
+            var voices=[],rows=[],seen={};
+            function add(id,title,season,number,file){id=String(id);if(!seen[id]) {seen[id]=true;voices.push({id:id,title:title || id});}rows.push({season:String(season),number:String(number),title:'Серия '+number,data:file,voice:{id:id,title:title || id}});}
+            if(links.playlist && Object.keys(links.playlist).length) {
+                Object.keys(links.playlist).forEach(function(s,si){Object.keys(links.playlist[s]).forEach(function(v){Object.keys(links.playlist[s][v]).forEach(function(e,ei){var f=links.playlist[s][v][e];add(v,v,+s || si+1,+e || ei+1,f);});});});
+            } else list(links.movie).forEach(function(f,i){add(i,f.translation,0,1,f);});
+            if(!rows.length) return fail(new Error('Filmix: плейлист пуст.'));
+            done({id:result.id,title:result.title,series:rows[0].season!=='0',voices:voices,rows:rows});
+        },fail);};
+        this.episodes=function(release,voice,done){done(release.rows.filter(function(e){return e.voice.id===String(voice.id);}));};
+        this.resolve=function(release,ep,done,fail){
+            var file=ep.data.link || '',quality={},match=file.match(/\[([\d,]+)\]/),heights=match?match[1].split(','):list(ep.data.qualities);
+            heights.map(Number).filter(function(n){return n>0 && n<=480;}).forEach(function(h){var u=absolute(file.replace(/\[[\d,]+\]|%s/,String(h)));if(u) quality[h+'p']=u;});
+            // Public guest access is limited to 480p; account-only qualities are not advertised.
+            if(!Object.keys(quality).length) return fail(new Error('Filmix: для этой записи нет гостевого качества до 480p.'));
+            done({quality:quality,subtitles:[]});
+        };
+    }
+    function KinoTochka(io,settings) {
+        this.id='kinotochka';this.title='KinoTochka';
+        function base(){return hostSetting(settings('kinotochka_host',''),'https://kinovibe.cc');}
+        this.search=function(query,movie,done,fail){
+            var kp=movie.kinopoisk_id || movie.kinopoiskId || movie.kp_id || (movie.source==='kinopoisk'?movie.id:'');
+            function byName(){io.request(base()+'/index.php?do=search',{do:'search',subaction:'search',search_start:0,full_search:0,result_from:1,story:query},'text',function(html){try{
+                var dom=doc(cleanPage(html)),rows=[],seen={};nodes(dom,'a.sres-wrap[href], .sres-wrap a[href], .short-title a[href], .sres-title a[href]').forEach(function(a){var url=absolute(a.getAttribute('href'),base());if(url && /\/\d+-[^/]+\.html/.test(url) && !seen[url]) {seen[url]=true;rows.push({id:url.match(/\/(\d+)-/)[1],url:url,title:(a.querySelector('.sres-title, h2') || a).textContent.trim(),year:(a.textContent.match(/(?:19|20)\d{2}/)||[])[0]});}});done(rank(rows,movie));
+            }catch(e){fail(e);}},fail);}
+            if(!kp) return byName();
+            io.request(base()+'/api/find-by-kinopoisk.php?kinopoisk='+encodeURIComponent(kp),null,'json',function(rows){if(!Array.isArray(rows) || !rows.length) return byName();done(rows.filter(function(r){return absolute(r.url);}).map(function(r){return {id:r.id,url:r.url,title:movie.title||movie.name||query,year:String(movie.release_date||movie.first_air_date||'').slice(0,4)};}));},byName);
+        };
+        this.open=function(result,done,fail){io.request(result.url,null,'text',function(html){try{
+            var file=playerFile(cleanPage(html));
+            function parsed(data){try{
+                var rows=[],voices=[{id:'default',title:'Озвучка источника'}];
+                function walk(value,s){var items=Array.isArray(value)?value:value.playlist || value.folder;if(!Array.isArray(items)) throw new Error('KinoTochka: неизвестный формат плейлиста.');items.forEach(function(item,i){var title=item.title || item.comment || '',folder=item.folder || item.playlist;if(folder) return walk(folder,+(title.match(/\d+/)||[])[0]||s);if(typeof item.file==='string') {var ids=item.file.match(/s(\d+)e(\d+)/i);rows.push({season:String(ids?+ids[1]:s || 1),number:String(ids?+ids[2]:+(title.match(/\d+/)||[])[0]||i+1),title:title.replace(/<[^>]*>/g,' ').trim(),data:item.file,voice:voices[0]});}});}
+                walk(data,1);if(!rows.length) throw new Error('KinoTochka: плейлист пуст.');done({id:result.id,title:result.title,series:true,voices:voices,rows:rows});
+            }catch(e){fail(e);}}
+            var url=absolute(file,result.url);
+            if(url && /\.(?:txt|json)(?:\?|$)/i.test(url)) io.request(url,null,'text',function(text){try{parsed(JSON.parse(text.replace(/^\uFEFF/,'')));}catch(e){fail(e);}},fail);
+            else if(/^\s*[\[{]/.test(file)) parsed(JSON.parse(file));
+            else if(url) {var v={id:'default',title:'Озвучка источника'};done({id:result.id,title:result.title,series:false,voices:[v],rows:[{season:'0',number:'1',voice:v,data:file}]});}
+            else fail(new Error('KinoTochka: нет открытого плейлиста.'));
+        }catch(e){fail(e);}},fail);};
+        this.episodes=function(release,voice,done){done(release.rows);};
+        this.resolve=function(release,ep,done,fail){openStream(io,ep.data,base(),done,fail);};
+    }
+    function AniMedia(io,settings) {
+        this.id='animedia';this.title='AniMedia';
+        function base(){return hostSetting(settings('animedia_host',''),'https://amd.online');}
+        this.search=function(query,movie,done,fail){io.request(base()+'/index.php?do=search',{do:'search',subaction:'search',story:query,full_search:0,result_from:1},'text',function(html){try{
+            var dom=doc(cleanPage(html)),seen={},rows=[];nodes(dom,'#dle-content .poster__link').forEach(function(a){var url=absolute(a.getAttribute('href'),base());if(!url || seen[url]) return;seen[url]=true;rows.push({id:(url.match(/\/(\d+)-/)||[])[1] || url,url:url,title:a.textContent.trim()});});done(rank(rows,movie));
+        }catch(e){fail(e);}},fail);};
+        this.open=function(result,done,fail){io.request(result.url,null,'text',function(html){try{
+            var dom=doc(cleanPage(html)),rows=[],seen={},v={id:'animedia',title:'AniMedia'},info=dom.querySelector('.pmovie__main-info'),s=info && info.textContent.match(/Season\s+(\d+)/i);
+            nodes(dom,'[data-vid][data-vlnk]').forEach(function(a){var n=+a.getAttribute('data-vid'),url=absolute(a.getAttribute('data-vlnk'),base());if(!n || seen[n] || !url || !/\/vod\/\d+/.test(url)) return;seen[n]=true;rows.push({season:s?s[1]:'1',number:String(n),title:'Серия '+n,voice:v,data:url});});
+            if(!rows.length) return fail(new Error('AniMedia: у этого релиза нет собственного открытого плеера.'));
+            done({id:result.id,title:result.title,series:true,voices:[v],rows:rows.sort(function(a,b){return +a.number-+b.number;})});
+        }catch(e){fail(e);}},fail);};
+        this.episodes=function(release,voice,done){done(release.rows);};
+        this.resolve=function(release,ep,done,fail){io.request(ep.data,null,'text',function(html){try{openStream(io,playerFile(html),ep.data,done,fail);}catch(e){fail(e);}},fail);};
     }
 
     function searchNames(movie) {
@@ -720,6 +820,7 @@
     }
     function maxQuality(map) {var keys=Object.keys(map||{}).filter(function (k) {return !!map[k];}).sort(function (a,b) {return qualityNumber(b)-qualityNumber(a);});var q=keys.length?qualityNumber(keys[0]):0;return q>=2160?'4K':q?q+'p':'';}
     function formatDate(value) {var d=new Date(value+'T12:00:00');return isNaN(d.getTime())?'':d.toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});}
+    function clock(value) {var n=Math.max(0,Math.floor(+value||0));return Math.floor(n/60)+':'+('0'+n%60).slice(-2);}
     function progressText(p,remaining) {
         var time=Math.max(0,+p.time||0),duration=Math.max(0,+p.duration||0);
         if (!duration) return time?'Просмотрено '+Math.floor(time/60)+' мин.':'';
@@ -743,7 +844,7 @@
         rezkaDecode: rezkaDecode, kodikDecode: kodikDecode, labelledLinks: labelledLinks, chooseQuality: chooseQuality,
         parseRezkaSearch: parseRezkaSearch, parseRezkaPage: parseRezkaPage, rezkaEpisodes: rezkaEpisodes,
         kodikResults: kodikResults, parseKodikPlayer: parseKodikPlayer, kodikEndpoint: kodikEndpoint, kodikCatalog: kodikCatalog,
-        Transport: Transport, Rezka: Rezka, Kodik: Kodik, Libria: Libria, flag: flag, movieKey: movieKey,
+        Filmix: Filmix, KinoTochka: KinoTochka, AniMedia: AniMedia, playerFile: playerFile, hlsQualities: hlsQualities, Transport: Transport, Rezka: Rezka, Kodik: Kodik, Libria: Libria, flag: flag, movieKey: movieKey,
         rememberSource: rememberSource, episodeTitle: episodeTitle, prepareStreams: prepareStreams,
         fixRezkaStream: fixRezkaStream, mergeCookies: mergeCookies, cookieHeader: cookieHeader, RezkaSession: RezkaSession };
     if (typeof module !== 'undefined' && module.exports) { module.exports = Core; return; }
@@ -761,8 +862,10 @@
             });
             save('migrated_010', true);
         }
+        if (['https://api.anilibria.app','https://anilibria.top','https://anilibria.tv'].indexOf(String(setting('libria_host','')).replace(/\/$/,''))>=0) save('libria_host','https://aniliberty.top');
+        if(!flag(setting('migrated_050_source',false))) {if(!setting('source','') || setting('source','')==='kodik') save('source','rezka');save('migrated_050_source',true);}
         function buildProviders(io) {
-            return [new Kodik(io, setting), new Rezka(io, setting, new RezkaSession(io, setting, save, Lampa)), new Libria(io, setting)];
+            return [new Rezka(io, setting, new RezkaSession(io, setting, save, Lampa)), new Kodik(io, setting), new Libria(io, setting), new Filmix(io, setting), new KinoTochka(io, setting), new AniMedia(io, setting)];
         }
         function saveResume(key, value) {
             var all=object(setting('resume',{})),updated={};
@@ -770,7 +873,12 @@
             Object.keys(updated).sort(function (a,b) {return (+updated[b].updated||0)-(+updated[a].updated||0);}).slice(500).forEach(function (k) {delete updated[k];});
             save('resume',updated);
         }
-        var currentPlayback = null, lastProgressSave = 0, activeScreen = null;
+        var currentPlayback = null, lastProgressSave = 0, activeScreen = null, cardBackgroundSnapshot=null;
+        function captureCardBackground(render) {
+            cardBackgroundSnapshot=null;var image=render.find('.full-start__background.loaded').last();
+            if(!image.length) return;var r=image[0].getBoundingClientRect(),c=root.getComputedStyle(image[0]);
+            if(r.width>0 && r.height>0) cardBackgroundSnapshot=image.clone().removeAttr('id').removeClass('dim').addClass('lp-native-background').css({position:'fixed',left:(r.left/root.innerWidth*100)+'vw',top:(r.top/root.innerHeight*100)+'vh',width:(r.width/root.innerWidth*100)+'vw',height:(r.height/root.innerHeight*100)+'vh',margin:0,transform:'none',transition:'none',opacity:c.opacity,zIndex:0});
+        }
         function paintNextLabel(event) {
             if (!Lampa.PlayerPanel || !Lampa.PlayerPanel.render || !currentPlayback) return;
             var rendered=Lampa.PlayerPanel.render();
@@ -827,7 +935,13 @@
             var source = providers.filter(function (p) { return p.id === historySource(movie); })[0] || providers[0];
             var initialQuery = movie.title || movie.name || movie.original_title || movie.original_name || '';
             var query = initialQuery, release = null, resultSelected = null, voice = null, season = '', episodes = [], results = null;
-            var lastEpisodeKey = null;
+            var lastEpisodeKey = null, lastControl = '', returnFilter = '';
+            var nativeImage=$('.full-start__background.loaded').not('.lp-native-background').last(), nativeBackground=cardBackgroundSnapshot;cardBackgroundSnapshot=null;
+            if (!nativeBackground && nativeImage.length && nativeImage[0].getBoundingClientRect().width>0) {
+                var rect=nativeImage[0].getBoundingClientRect(), style=root.getComputedStyle(nativeImage[0]);
+                nativeBackground=nativeImage.clone().removeAttr('id').removeClass('dim').addClass('lp-native-background');
+                nativeBackground.css({position:'fixed',left:(rect.left/root.innerWidth*100)+'vw',top:(rect.top/root.innerHeight*100)+'vh',width:(rect.width/root.innerWidth*100)+'vw',height:(rect.height/root.innerHeight*100)+'vh',margin:0,transform:'none',transition:'none',opacity:style.opacity,zIndex:0});
+            }
             var busy = false, destroyed = false, last = null, generation = 0, reverse = false, pendingResume = null;
             var cache = {}, probeQueue = [], probing = 0, observed = null, metadata = { details: movie, seasons: {}, id: null, request: 0, signature: '' };
             var type = /^(tv|movie)$/.test(movie.media_type) ? movie.media_type : movie.name || movie.first_air_date ? 'tv' : 'movie';
@@ -846,7 +960,7 @@
             function series() { return release && typeof release.series === 'boolean' ? release.series : type === 'tv'; }
             function view() { var v = setting(series() ? 'view_series' : 'view_movie', series() ? 'horizontal' : 'vertical'); return ['horizontal','vertical','card'].indexOf(v) < 0 || !series() && v === 'horizontal' ? 'vertical' : v; }
             function focusNode(node) {
-                node = $(node);last = node[0];if (last && last._lpEpisodeKey) lastEpisodeKey=last._lpEpisodeKey;
+                node = $(node);last = node[0];lastControl=node.attr('data-lp-control') || '';if(lastControl) returnFilter=lastControl;if (last && last._lpEpisodeKey) lastEpisodeKey=last._lpEpisodeKey;
                 node.parents('.lp-scroll').each(function () { keepVisible(this,node[0]); });
                 if (node[0] && node[0]._lpProbe) enqueueProbe(node[0]._lpProbe);
             }
@@ -858,6 +972,7 @@
             }
             function control(label, action, target, selected) {
                 var node = interactive($('<div class="lamplay__control"></div>').text(label),action);
+                node.attr('data-lp-control',label.indexOf('Вид:')===0?'view':label.indexOf('Источник:')===0?'source':label);
                 if (selected) node.addClass('lp-selected');
                 (target || tools).append(node);return node;
             }
@@ -903,16 +1018,43 @@
             function layout() {
                 var v = release ? view() : 'results';
                 html.attr('data-view',v).toggleClass('lp-series',!!release && series()).toggleClass('lp-film',!!release && !series());
-                if (release && series() && v !== 'vertical') {
+                if (release && v === 'card' || release && series() && v === 'horizontal') {
                     side.detach();main.detach();filters.append(tools);top.append(hero,filters);panel.append(top,bodyPane);
                 } else {
                     top.detach();side.append(hero,tools);main.append(filters,bodyPane);panel.append(side,main);
                 }
-                var bg = imageURL(metadata.details.backdrop_path || metadata.details.poster_path,'original');
-                if (bg && bg!==lastBackground && Lampa.Background && Lampa.Background.change) {Lampa.Background.change(bg);lastBackground=bg;}
-                backdrop.empty();
-                if (v==='card' && bg) backdrop.append(setImage($('<img alt="">'),bg));
+                syncBackground(v);
+                fitStrip();
             }
+            function syncBackground(v) {
+                if (!inActivity()) return;
+                $('body').addClass('lp-active').toggleClass('lp-card-background',v==='card');
+                // Both the header and plugin share Lampa's single viewport background.
+                // A native full-card image is reused outside the moving activity pane.
+                var sharp=v==='card' && root.innerWidth>790 && !flag(Lampa.Storage.get('light_version',false));
+                if(sharp && !nativeBackground) {
+                    var url=imageURL(movie.backdrop_path,'w1280') || movie.background_image;
+                    if(url) nativeBackground=setImage($('<img class="full-start__background loaded lp-native-background" alt="">'),url).css({position:'fixed',transition:'none',zIndex:0});
+                }
+                if(nativeBackground) {if(!nativeBackground.parent().length) $('body').prepend(nativeBackground);nativeBackground.toggle(sharp);}
+                var bg=Lampa.Utils && Lampa.Utils.cardImgBackground ? Lampa.Utils.cardImgBackground(movie) : imageURL(movie.poster_path || movie.backdrop_path,'w200');
+                if(v!=='card') bg=imageURL(metadata.details.backdrop_path || metadata.details.poster_path,'w200');
+                if (bg && bg!==lastBackground && Lampa.Background && Lampa.Background.change) {Lampa.Background.change(bg);lastBackground=bg;}
+            }
+            function releaseBackground() { lastBackground='';$('body').removeClass('lp-active lp-card-background');if(nativeBackground) nativeBackground.detach(); }
+            function fitStrip() {
+                if(!release || view()==='vertical') return;
+                if(root.requestAnimationFrame) root.requestAnimationFrame(function () {
+                    if(destroyed || !html[0].isConnected) return;
+                    // Reserve the complete thumbnail, metadata and all three summary lines.
+                    top.css('min-height','');var height=body[0].scrollHeight, total=panel[0].clientHeight, gap=parseFloat(root.getComputedStyle(panel[0]).rowGap)||16;
+                    var padding=parseFloat(root.getComputedStyle(panel[0]).paddingTop)+parseFloat(root.getComputedStyle(panel[0]).paddingBottom);
+                    var available=total-padding-height-gap-12;
+                    if(view()==='horizontal') top.css('min-height',Math.max(top[0].scrollHeight,available)+'px');
+                    else top.css('min-height','');
+                });
+            }
+            function controlTarget(id) { return filters.add(tools).find('[data-lp-control]').filter(function () {return $(this).attr('data-lp-control')===id;}).first(); }
             function searchMenu() {
                 var options = searchNames(movie).map(function (q) {return {title:q,value:q};});
                 options.unshift({title:'Указать название',value:'__input'});
@@ -925,7 +1067,7 @@
                 });
             }
             function refreshControls() {
-                tools.empty();filters.empty();
+                var restoreControl=lastControl;tools.empty();filters.empty();
                 if (release && series()) {
                     var seasons = seasonList();
                     var seasonStrip = $('<div class="lp-strip-group"><div class="lp-caption">Сезоны</div><div class="lp-scroll lp-strip"></div></div>');
@@ -943,13 +1085,13 @@
                 if (release) control('Вид: '+({horizontal:'Горизонтальный',vertical:'Вертикальный',card:'Карточка'}[view()]),function () {
                     var names=series()?['horizontal','vertical','card']:['vertical','card'];
                     var next=names[(names.indexOf(view())+1)%names.length];
-                    save(series()?'view_series':'view_movie',next);renderEpisodes(lastEpisodeKey);
+                    save(series()?'view_series':'view_movie',next);lastControl='view';renderEpisodes(lastEpisodeKey);
                 });
                 control('Сбросить фильтр',function () {query=initialQuery;pendingResume=null;search();});
                 control('Поиск: '+query,searchMenu).attr('aria-label','Поиск');
                 if (release) control('К результатам',backToResults);
                 if (busy) control('Отменить',cancel);
-                layout();
+                layout();if(restoreControl) {var restored=controlTarget(restoreControl);if(restored.length) last=restored[0];}
             }
             function search() {
                 release=null;resultSelected=null;voice=null;episodes=[];results=null;body.empty();
@@ -1048,20 +1190,28 @@
             }
             function record(snapshot) {saveResume(key,snapshot);}
             function renderHero() {
+                var onContinue=last && $(last).hasClass('lp-continue');
                 hero.empty();var d=metadata.details, resume=savedResume();
                 var image=imageURL(d.backdrop_path || d.poster_path,'w780');
                 hero.removeClass('lp-has-cover');
-                if (image) hero.append(setImage($('<img class="lp-cover" alt="">').on('load',function () {hero.addClass('lp-has-cover');}),image));
-                var content=$('<div class="lp-hero-content"></div>');
-                if (metadata.logo) content.append(setImage($('<img class="lp-title-logo" alt="">').attr('alt',initialQuery),metadata.logo));
-                else content.append($('<div class="lp-name"></div>').text(d.title||d.name||initialQuery));
-                if (resume) {
-                    var label='Продолжить'+(resume.series?' · S'+resume.season+' E'+resume.number:'');
-                    content.append(interactive($('<div class="lp-continue"></div>').text('▶ '+label),resumePlay));
-                    content.append($('<div class="lp-resume-detail"></div>').text([resume.sourceTitle,resume.voice.title,resume.episodeTitle,progressText(resume,true)].filter(Boolean).join(' · ')));
-                    content.append($('<div class="lp-progress"><i></i></div>').find('i').css('width',Math.max(0,Math.min(100,resume.percent))+'%').end());
-                } else content.append($('<div class="lp-resume-detail"></div>').text('Выберите '+(release && !series()?'озвучку':'серию')+' для просмотра'));
-                hero.append(content);
+                if (image && view()!=='card') hero.append(setImage($('<img class="lp-cover" alt="">').on('load',function () {hero.addClass('lp-has-cover');}),image));
+                var content=$('<div class="lp-hero-content"></div>'), title=$('<div class="lp-title-slot"></div>');
+                if (metadata.logo) title.append(setImage($('<img class="lp-title-logo" alt="">').attr('alt',initialQuery),metadata.logo));
+                else title.append($('<div class="lp-name"></div>').text(d.title||d.name||initialQuery));
+                content.append(title);
+                var row=$('<div class="lp-resume-row"></div>'), info=$('<div class="lp-resume-info"></div>');
+                if (resume || episodes.length) {
+                    var ep=episodes.filter(function(e){return !e.loadSeason;})[0];
+                    var label=(resume?'Продолжить':'Смотреть')+((resume?resume.series:series())?' · S'+(resume?resume.season:ep.season)+' E'+(resume?resume.number:ep.number):'');
+                    row.append(interactive($('<div class="lp-continue"></div>').append(PLAY,$('<span></span>').text(label)),resume?resumePlay:function(){play(ep);}));
+                    if (resume) {
+                        info.append($('<div class="lp-resume-title"></div>').text(resume.episodeTitle || ''));
+                        info.append($('<div class="lp-resume-detail"></div>').text([resume.sourceTitle,resume.voice.title].filter(Boolean).join(' · ')));
+                        if(resume.time>0 && resume.duration>0) info.append($('<div class="lp-remaining"></div>').append($('<div class="lp-progress"><i></i></div>').find('i').css('width',Math.max(0,Math.min(100,resume.percent))+'%').end(),$('<span></span>').text(progressText(resume,true))));
+                    } else info.append($('<div class="lp-resume-detail"></div>').text(source.title+' · '+(voice && voice.title || '')));
+                } else info.append($('<div class="lp-resume-detail"></div>').text('Выберите '+(release && !series()?'озвучку':'серию')+' для просмотра'));
+                content.append(row.append(info));hero.append(content);
+                if(onContinue) last=hero.find('.lp-continue')[0];
             }
             function resumePlay() {
                 var saved=savedResume();if (!saved || busy) return;
@@ -1078,32 +1228,35 @@
                 play(ep,true);
             }
             function renderEpisodes(restore) {
-                if (!release || destroyed) return;stopProbes();body.empty();refreshControls();renderHero();setStatus('');
+                if (!release || destroyed) return;var restoreControl=lastControl;stopProbes();body.empty();refreshControls();renderHero();setStatus('');
                 var ticket=generation;
                 visibleEpisodes().forEach(function (ep) {
                     if (ep.loadSeason) {body.append(interactive($('<div class="lamplay__item"></div>').text(ep.title),loadEpisodes));return;}
                     var v=voiceOf(ep), m=series()?detailFor(ep):metadata.details, p=progress(ep);
                     var node=interactive($('<div class="lamplay__item lp-episode"></div>'),function () {play(ep);});
                     node[0]._lpEpisodeKey=streamKey(ep);
-                    var picture=$('<div class="lp-picture"></div>');
+                    var picture=$('<div class="lp-picture"></div>');node.toggleClass('lp-started',+p.time>0);picture.append($('<span class="lp-focus-play"></span>').append(PLAY));
                     var img=series()?thumbnail(ep):'';
                     if (img) picture.append(setImage($('<img alt="" loading="lazy">'),img));
                     if (series()) picture.append($('<span class="lp-episode-number"></span>').text('S'+ep.season+':E'+ep.number));
                     var badge=$('<span class="lp-quality"></span>');picture.append(badge);
                     var duration=+p.duration || (series()?+m.runtime*60:+m.runtime*60) || 0;
-                    picture.append($('<span class="lp-runtime"></span>').text(duration?Math.ceil(duration/60)+' мин.':''));
+                    picture.append($('<span class="lp-runtime"></span>').text(+p.time>0?clock(p.time)+' / '+clock(duration):duration?Math.ceil(duration/60)+' мин.':''));
+                    if(+p.time>0) picture.append($('<span class="lp-percent"></span>').text(Math.round(+p.percent || p.time/duration*100)+'%'));
                     var line=$('<div class="lp-progress"><i></i></div>');line.find('i').css('width',Math.max(0,Math.min(100,+p.percent||0))+'%');picture.append(line);
                     var info=$('<div class="lp-episode-info"></div>');
                     info.append($('<div class="lamplay__item-title"></div>').text(series()?episodeName(ep):v.title));
-                    if (p.time) info.append($('<div class="lp-watched"></div>').text(progressText(p,false)));
+                    if (p.time && view()==='vertical') info.append($('<div class="lp-watched"></div>').text(progressText(p,false)));
                     var details=[];if (series() && +m.vote_average>0) details.push('★ '+Number(m.vote_average).toFixed(1));
                     if (m.air_date || m.release_date) details.push(formatDate(m.air_date || m.release_date));
                     if (!series() && duration) details.push(Math.ceil(duration/60)+' мин.');
-                    info.append($('<div class="lamplay__item-detail"></div>').text(details.join(' · ')));
+                    var meta=$('<div class="lamplay__item-detail lp-episode-meta"></div>').append($('<span></span>').text(details[0] || ''));
+                    var qualityMeta=$('<span class="lp-quality-meta"></span>');meta.append(qualityMeta,$('<span></span>').text(details.slice(1).join(' · ')));
+                    if(view()==='vertical') info.append(meta);else info.prepend(meta);
                     var desc=series()?m.overview:m.tagline;
                     if (desc) info.append($('<div class="lp-description"></div>').text(desc));
                     node.append(picture,info);body.append(node);
-                    var task={ep:ep,node:node,badge:badge,ticket:ticket,source:source.id,key:streamKey(ep),release:release};node[0]._lpProbe=task;
+                    var task={ep:ep,node:node,badge:badge,qualityMeta:qualityMeta,ticket:ticket,source:source.id,key:streamKey(ep),release:release};node[0]._lpProbe=task;
                     var hit=cache[task.key];if (hit && Date.now()-hit.time<60000) showQuality(task,hit.streams);
                 });
                 if (root.IntersectionObserver) {
@@ -1111,11 +1264,11 @@
                     body.find('.lp-episode').each(function () {observed.observe(this);});
                 }
                 last=restore?body.find('.lp-episode').filter(function () {return this._lpEpisodeKey===restore;})[0]:null;
-                last=last || body.find('.selector')[0] || tools.find('.selector')[0];self.start();
+                last=restoreControl && controlTarget(restoreControl)[0] || last || body.find('.selector')[0] || tools.find('.selector')[0];self.start();fitStrip();
             }
             function showQuality(task,streams) {
                 if (!task.node[0].isConnected || task.ticket!==generation) return;
-                var q=maxQuality(streams.quality);task.badge.text(q).toggle(!!q);
+                var q=maxQuality(streams.quality);task.badge.text(q).toggle(!!q);if(task.qualityMeta) task.qualityMeta.text(q).toggle(!!q);
             }
             function enqueueProbe(task) {
                 if (destroyed || busy || task.ticket!==generation) return;
@@ -1217,7 +1370,7 @@
             this.render=function () {return html;};
             this.start=function () {
                 if (!inActivity()) return;
-                renderHero();
+                syncBackground(release?view():'results');
                 Lampa.Controller.add('content',{toggle:function () {
                     Lampa.Controller.collectionSet(html);
                     var target=last && html[0].contains(last)?last:body.find('.selector')[0] || tools.find('.selector')[0];
@@ -1225,11 +1378,19 @@
                 },up:function () {move('up','head');},down:function () {move('down');},left:function () {move('left','menu');},right:function () {move('right');},back:self.back});
                 Lampa.Controller.toggle('content');
             };
-            function move(dir,fallback) {if (root.Navigator.canmove(dir)) root.Navigator.move(dir);else if (fallback) Lampa.Controller.toggle(fallback);}
+            function move(dir,fallback) {
+                var current=html.find('.selector.focus').first();if(!current.length && last) current=$(last);
+                var filter=current.attr('data-lp-control'), parent=current.parent(), first=parent.children('.selector').first()[0]===current[0];
+                var resume=hero.find('.lp-continue');
+                if(dir==='left' && filter && first && resume.length) {returnFilter=filter;Lampa.Controller.collectionFocus(resume,html);return;}
+                if(dir==='right' && current.hasClass('lp-continue')) {var next=controlTarget(returnFilter);if(!next.length) next=filters.find('.selector').first();if(next.length) {Lampa.Controller.collectionFocus(next,html);return;}}
+                if (root.Navigator.canmove(dir)) root.Navigator.move(dir);else if (fallback) Lampa.Controller.toggle(fallback);
+            }
             this.back=function () {if (busy) return cancel();if (release) return backToResults();Lampa.Activity.backward();};
-            this.pause=function () {};this.stop=function () {};
+            this.pause=function () {releaseBackground();};this.stop=function () {releaseBackground();};
+            var resizeHandler=function(){if(inActivity()) syncBackground(release?view():'results');fitStrip();};root.addEventListener('resize',resizeHandler);
             this.playerClosed=function () {if (release && !busy) renderEpisodes(lastEpisodeKey);else renderHero();};
-            this.destroy=function () {destroyed=true;if (activeScreen===self) activeScreen=null;changeGeneration();metadataIo.clear();html.remove();};
+            this.destroy=function () {releaseBackground();if(nativeBackground) nativeBackground.remove();root.removeEventListener('resize',resizeHandler);destroyed=true;if (activeScreen===self) activeScreen=null;changeGeneration();metadataIo.clear();html.remove();};
         }
 
         $('<style id="lamplay-style"></style>').text([
@@ -1307,7 +1468,7 @@
             ".lp-series[data-view=horizontal] .lp-episode.focus .lp-picture,.lp-series[data-view=card] .lp-episode.focus .lp-picture{box-shadow:0 0 0 2px #fff}",
             ".lp-series[data-view=horizontal] .lp-episode.focus .lamplay__item-detail,.lp-series[data-view=card] .lp-episode.focus .lamplay__item-detail{color:rgba(255,255,255,.8)}",
             ".lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{overflow-y:auto}",
-            ".lamplay-card-logo{display:block;max-width:100%;max-height:5.5em;object-fit:contain;object-position:left center}"
+            "\nbody.lp-active .head,body.lp-active .head__body{background:transparent!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}\nbody.lp-active .full-start__background:not(.lp-native-background){visibility:hidden}\n.lp-native-background{pointer-events:none!important}\n.lamplay .lp-backdrop{display:none!important}\n.lp-play{width:1em;height:1em;display:block;flex:none;fill:currentColor;overflow:visible}\n.lp-continue{display:flex;align-items:center;gap:.45em;border-width:2px;border-radius:1.3em;line-height:1.2;white-space:nowrap}\n.lp-title-slot{min-height:0;max-width:100%;display:flex;align-items:center}\n.lp-title-logo{width:auto;max-width:100%;height:3.7em;max-height:100%;object-fit:contain;object-position:left center}\n.lp-resume-row{display:flex;flex-direction:column;gap:.4em;min-width:0}\n.lp-resume-info{min-width:0;display:flex;flex-direction:column;gap:.18em}\n.lp-resume-title{font-size:.94em;font-weight:600;line-height:1.15}\n.lp-remaining{display:flex;align-items:center;gap:.45em;font-size:.75em}\n.lp-remaining>.lp-progress{flex:1;min-width:3em}.lp-remaining>span{flex:none}\n.lp-top{min-height:0}.lp-series[data-view=horizontal] .lp-top>.lp-hero{width:38%;height:auto;min-height:30vh;max-height:none;align-self:stretch}\n.lp-series[data-view=horizontal] .lp-filters{justify-content:space-between;gap:.75em}\n.lp-series[data-view=horizontal] .lp-panel{gap:1em}\n.lp-series[data-view=horizontal] .lp-hero-content{padding:.8em}\n.lamplay[data-view=card] .lp-panel{flex-direction:column}\n.lamplay[data-view=card] .lp-top{flex-direction:column;gap:.65em;flex:none}\n.lamplay[data-view=card] .lp-top>.lp-hero{width:100%;height:auto;min-height:0;max-height:none;overflow:visible;border-radius:0}\n.lamplay[data-view=card] .lp-hero-content{position:static;padding:.2em;justify-content:flex-start;gap:.4em}\n.lamplay[data-view=card] .lp-title-slot{height:3.8em;max-width:25em}\n.lamplay[data-view=card] .lp-title-logo{height:100%;max-width:100%}\n.lamplay[data-view=card] .lp-resume-row{flex-direction:row;align-items:center;gap:.9em}\n.lamplay[data-view=card] .lp-resume-info{max-width:28em;flex:1}.lamplay[data-view=card] .lp-continue{flex:none}\n.lamplay[data-view=card] .lp-filters{gap:.5em;font-size:.88em}\n.lamplay[data-view=card] .lp-tools{flex-direction:row}\n.lamplay[data-view=card] .lp-body-pane{flex:1;min-height:0}\n.lamplay[data-view=card] .lp-side,.lamplay[data-view=card] .lp-main{display:none}\n.lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{padding:.45em .35em}\n.lp-series[data-view=horizontal] .lp-episode,.lp-series[data-view=card] .lp-episode{overflow:visible;border:0;padding:.15em .3em}\n.lp-series[data-view=horizontal] .lp-picture,.lp-series[data-view=card] .lp-picture{overflow:hidden;border-radius:.4em;box-shadow:none;outline:0 solid transparent;outline-offset:0;isolation:isolate}\n.lp-series[data-view=horizontal] .lp-episode.lp-started .lp-picture,.lp-series[data-view=card] .lp-episode.lp-started .lp-picture{outline:1px solid rgba(255,255,255,.5);outline-offset:1px}\n.lp-series[data-view=horizontal] .lp-episode.focus .lp-picture,.lp-series[data-view=card] .lp-episode.focus .lp-picture{box-shadow:none;outline:.17em solid #fff;outline-offset:.17em}\n.lp-picture:after{content:'';position:absolute;left:0;right:0;bottom:0;height:32%;background:linear-gradient(transparent,rgba(0,0,0,.75));z-index:0;pointer-events:none}\n.lp-picture .lp-progress,.lp-runtime,.lp-percent{z-index:1}\n.lp-picture .lp-progress{left:.4em;right:.4em;bottom:.4em;height:.22em;min-height:3px;background:rgba(255,255,255,.45)}\n.lp-runtime,.lp-percent{position:absolute;bottom:1.05em;font-size:.78em;line-height:1;font-weight:600;text-shadow:0 1px 3px #000;background:none;padding:0}\n.lp-runtime{right:.5em}.lp-percent{left:.5em}\n.lp-focus-play{display:none;position:absolute;inset:0;z-index:2;align-items:center;justify-content:center;pointer-events:none}\n.lp-focus-play .lp-play{width:2em;height:2em;filter:drop-shadow(0 1px 3px #0006)}\n.lp-episode.focus .lp-focus-play{display:flex}\n.lp-series[data-view=horizontal] .lp-quality,.lp-series[data-view=card] .lp-quality{display:none!important}\n.lp-episode-meta{display:flex;align-items:center;gap:.5em;flex-wrap:wrap;margin:.15em 0 .4em;font-size:.76em}\n.lp-quality-meta{display:inline-block;padding:.1em .25em;border-radius:.2em;background:rgba(255,255,255,.25);font-weight:600}.lp-quality-meta:empty{display:none}\n.lp-series[data-view=vertical] .lp-quality-meta{display:none}\n.lp-series[data-view=horizontal] .lp-description,.lp-series[data-view=card] .lp-description{display:block;-webkit-line-clamp:unset;overflow:visible;font-size:.8em;line-height:1.3}\n.lp-series[data-view=horizontal] .lp-episode-info,.lp-series[data-view=card] .lp-episode-info{overflow:visible;padding:.5em .05em .2em}\n.lp-series[data-view=horizontal] .lp-episode.focus .lp-progress i,.lp-series[data-view=card] .lp-episode.focus .lp-progress i{background:#fff}\n.full-start-new__title.lp-logo-slot,.full-start__title.lp-logo-slot{font-size:1em!important;display:flex;align-items:center;height:6.5em;max-height:22vh;padding:.55em 0 .85em;margin:0 0 .7em;overflow:visible;line-height:1}\n.lp-logo-slot+.full-start-new__tagline{margin-top:0}\n.lamplay-card-logo{display:block;width:auto;max-width:100%;max-height:100%;height:100%;object-fit:contain;object-position:left center}\n.lp-settings-icon{width:1.7em;height:1.7em;margin-right:.8em;display:flex;align-items:center;justify-content:center;flex:none;color:inherit}\n.lp-settings-icon svg{width:100%;height:100%;fill:currentColor}.lp-hd-icon{display:block;width:100%;height:100%;background:currentColor;mask-size:contain;-webkit-mask-size:contain;mask-repeat:no-repeat;-webkit-mask-repeat:no-repeat}\n.lp-settings-row{display:flex;align-items:center}.lp-settings-row>.settings-param__name{flex:1}\nbody.glass--style .settings-folder[data-component^=lamplay_] .settings-folder__icon{filter:none!important;-webkit-filter:none!important}\n@media(max-height:650px){.lamplay[data-view=card] .lp-title-slot{height:2.8em}.lamplay[data-view=card] .lp-top{gap:.4em}.lamplay[data-view=card] .lp-filters{gap:.35em}.lp-series[data-view=horizontal] .lp-top>.lp-hero{min-height:27vh}.lp-hero-content{gap:.3em}.lp-title-logo{height:2.8em}}\n@media(max-width:700px){.lamplay[data-view=card] .lp-resume-row{flex-direction:column;align-items:flex-start}.lamplay[data-view=card] .lp-resume-info{max-width:100%}.lp-series[data-view=horizontal] .lp-top>.lp-hero{width:40%;min-height:11em}.lp-series[data-view=horizontal] .lp-hero-content{padding:.4em}.lp-continue{font-size:.85em}.lp-resume-detail{font-size:.75em}}\n"
         ].join('\n')).appendTo('head');
         Lampa.Component.add(KEY, Screen);
         var buttonBindings = [];
@@ -1316,7 +1477,7 @@
         function focusPriority(binding) {
             var a=Lampa.Activity.active(),visible=a && a.activity && a.activity.render && a.activity.render();
             visible=visible && (visible[0] || visible);
-            return flag(setting('button_first',true),true) && binding.focusUntil>Date.now() && binding.direct &&
+            return flag(setting('button_first',true),true) && binding.focusUntil>0 && binding.direct &&
                 root.document.documentElement.contains(binding.direct[0]) && (!visible || visible.contains(binding.direct[0]));
         }
         function initialFocus(binding) {
@@ -1329,7 +1490,7 @@
         function armPriority(binding,event) {
             binding.render=event.object.activity.render();
             binding.startComponent=event.link && event.link.items && event.link.items[0];
-            binding.focusUntil=Date.now()+1800;
+            binding.focusUntil=1;
             if (binding.startComponent && flag(setting('button_first',true),true)) binding.startComponent.last=(binding.direct || binding.button)[0];
             if (binding.direct) binding.direct.off('.lamplayPriority').on('hover:focus.lamplayPriority hover:touch.lamplayPriority',function () {
                 if (binding.startComponent) binding.startComponent.last=this;
@@ -1353,6 +1514,11 @@
             return originalCollectionFocus.apply(this,args);
         };
 
+        var nativeNavigatorFocus=root.Navigator && root.Navigator.focus;
+        if(nativeNavigatorFocus) root.Navigator.focus=function(target) {
+            for(var i=buttonBindings.length-1;i>=0;i--) if(focusPriority(buttonBindings[i])) {var context=buttonBindings[i].render[0], node=target && (target[0] || target);if(node && node.nodeType && context.contains(node)) {target=buttonBindings[i].direct[0];break;}}
+            var args=Array.prototype.slice.call(arguments);args[0]=target;return nativeNavigatorFocus.apply(this,args);
+        };
         function updateButton(binding) {
             var parent = binding.button.parent();
             if (!parent.length) return;
@@ -1417,6 +1583,7 @@
             }
             var button = $('<div class="full-start__button selector view--lamplay">' + LOGO + '<span>LamPlay</span></div>');
             button.on('hover:enter', function () {
+                captureCardBackground(render);
                 Lampa.Activity.push({ component: KEY, title: NAME, movie: event.data.movie, page: 1, url: '' });
             });
             var anchor = render.find('.view--torrent').first();
@@ -1434,7 +1601,7 @@
         function updateCardLogo(binding) {
             var title=binding.title;
             if (!title.length || title[0]._lamplayLogoBinding!==binding || !root.document.documentElement.contains(title[0])) return;
-            function restore() {if (title.find('.lamplay-card-logo').length) title.text(binding.name);}
+            function restore() {title.removeClass('lp-logo-slot');if (title.find('.lamplay-card-logo').length) title.text(binding.name);}
             if (!flag(setting('card_logo',false))) return restore();
             var data=binding.movie,source=data.source || 'tmdb';
             if (!data.id || ['tmdb','cub'].indexOf(source)<0 || !Lampa.TMDB || !Lampa.TMDB.api || !Lampa.TMDB.key) return restore();
@@ -1447,8 +1614,8 @@
                 if (!path) return restore();
                 if (title.find('.lamplay-card-logo').attr('data-logo-path')===path) return;
                 var img=$('<img class="lamplay-card-logo">').attr('alt',binding.name).attr('data-logo-path',path);
-                img.on('error',function () {if (title.find('.lamplay-card-logo')[0]===this) title.text(binding.name);});
-                title.empty().append(img);
+                img.on('error',function () {if (title.find('.lamplay-card-logo')[0]===this) {title.removeClass('lp-logo-slot').text(binding.name);}});
+                title.addClass('lp-logo-slot').empty().append(img);
                 img.attr('src',Lampa.TMDB.image('/t/p/w500'+path.replace(/\.svg$/i,'.png')));
             }
             if (own(cardLogoCache,key)) return apply(cardLogoCache[key]);
@@ -1972,6 +2139,8 @@
 
         }
 
+        var menuIcons={"kodik": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" fill=\"currentColor\"><path d=\"M5 4h5v10h4L23 4h6L18 16l11 12h-6L14 18h-4v10H5Z\"/></svg>", "anilibria": "<svg version=\"1.0\" xmlns=\"http://www.w3.org/2000/svg\" width=\"512.000000pt\" height=\"512.000000pt\" viewBox=\"0 0 512.000000 512.000000\" preserveAspectRatio=\"xMidYMid meet\"><metadata>Created by potrace 1.11, written by Peter Selinger 2001-2013</metadata><g transform=\"translate(0.000000,512.000000) scale(0.100000,-0.100000)\"fill=\"currentColor\" stroke=\"none\"><path d=\"M2468 4660 c-5 -14 -21 -56 -35 -95 -13 -38 -37 -106 -53 -150 -16-44 -76 -213 -134 -375 -57 -162 -120 -340 -140 -395 -19 -55 -56 -158 -81-230 -26 -71 -62 -175 -82 -230 -19 -55 -38 -103 -41 -107 -6 -5 -126 198-503 855 -236 412 -422 733 -430 741 -4 5 -54 -21 -115 -60 -59 -38 -112 -71-117 -73 -5 -2 -41 -24 -81 -50 -39 -26 -105 -69 -147 -96 l-75 -48 99 -176c54 -97 110 -196 124 -221 14 -25 40 -70 56 -100 17 -30 41 -72 54 -92 13 -2123 -39 23 -42 0 -2 25 -48 56 -102 31 -55 66 -117 78 -139 13 -22 65 -114 116-205 51 -91 103 -183 115 -205 13 -22 121 -213 240 -425 203 -361 216 -387207 -415 -6 -16 -50 -140 -98 -275 -47 -135 -90 -256 -95 -270 -4 -14 -26 -77-49 -140 -23 -63 -55 -153 -71 -200 -16 -47 -32 -92 -36 -100 -3 -8 -7 -19 -9-25 -1 -5 -41 -118 -89 -250 -47 -132 -99 -278 -115 -325 -15 -47 -38 -109-49 -138 -12 -29 -21 -56 -21 -60 0 -4 161 -8 357 -7 l357 0 37 140 c20 77 80304 134 505 54 201 105 393 113 427 9 35 19 63 23 63 5 0 180 -305 327 -57014 -25 40 -71 58 -103 19 -32 34 -62 34 -68 0 -5 3 -9 6 -9 3 0 76 46 162 102279 180 315 204 448 290 72 47 149 97 172 112 l41 26 15 -53 c9 -28 27 -95 42-147 14 -52 28 -102 30 -110 5 -15 -50 -53 -616 -419 -63 -40 -119 -77 -124-82 -4 -4 4 -30 19 -58 l28 -51 31 19 c17 10 60 34 96 53 120 65 214 115 414223 109 59 202 103 206 98 4 -4 22 -62 39 -128 17 -66 41 -152 52 -190 l21-71 359 1 c198 0 359 2 359 5 0 3 -25 88 -56 190 -31 102 -58 196 -60 209 -314 -8 29 -11 34 -3 5 -11 30 -18 55 -7 26 -26 90 -42 143 l-30 95 191 102c105 56 218 117 251 135 33 18 102 55 153 82 50 27 92 54 92 60 0 5 -23 72-51 147 -50 133 -52 137 -74 125 -12 -7 -100 -63 -196 -125 -422 -275 -433-282 -440 -269 -12 21 -93 307 -88 311 2 2 90 59 194 126 444 288 447 290 440308 -4 9 -52 152 -107 317 -56 165 -104 304 -108 308 -4 4 -145 -80 -314 -189-169 -108 -309 -194 -311 -192 -5 5 -169 547 -274 908 -17 58 -35 119 -41 135-5 17 -72 242 -150 500 -77 259 -151 506 -164 550 -14 44 -31 101 -38 128l-12 47 -96 0 c-52 1 -157 2 -234 3 l-138 2 -10 -25z m125 -927 c2 -16 57-219 122 -453 64 -234 119 -436 121 -449 3 -14 7 -28 10 -33 3 -4 7 -18 9 -293 -12 15 -61 29 -108 22 -79 35 -130 41 -156 2 -5 10 -35 19 -66 9 -31 18 -6521 -75 2 -11 14 -53 25 -94 26 -89 60 -221 60 -229 0 -4 -15 -15 -32 -26 -18-10 -109 -67 -201 -127 -93 -59 -170 -108 -172 -108 -3 0 -194 328 -233 400-7 14 -22 39 -32 55 -11 17 -23 36 -26 44 -4 7 -33 58 -64 113 l-58 99 15 52c8 29 15 57 17 62 2 6 6 24 11 40 4 17 41 156 82 310 41 154 77 287 79 295 522 19 72 48 180 14 52 40 150 58 217 17 67 34 120 38 118 4 -3 10 -17 13 -32z\"/></g></svg>", "extra": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M4 8h4m6 0h14M4 16h15m6 0h3M4 24h6m6 0h12\"/><circle cx=\"11\" cy=\"8\" r=\"3\"/><circle cx=\"22\" cy=\"16\" r=\"3\"/><circle cx=\"13\" cy=\"24\" r=\"3\"/></svg>", "rating": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m16 3.5 3.8 7.7 8.5 1.2-6.2 6 1.5 8.5-7.6-4-7.6 4 1.5-8.5-6.2-6 8.5-1.2Z\"/></svg>", "about": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"16\" cy=\"16\" r=\"12\"/><path d=\"M16 14v9\"/><circle cx=\"16\" cy=\"9.2\" r=\"1.1\" fill=\"currentColor\" stroke=\"none\"/></svg>", "hdrezka": "<span class=\"lp-hd-icon\" style=\"mask-image:url(data:image/png;base64,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);-webkit-mask-image:url(data:image/png;base64,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)\"></span>"};
+        function menuIcon(item,id) {if(!item.find('.lp-settings-icon').length) item.addClass('lp-settings-row').prepend($('<span class="lp-settings-icon" aria-hidden="true"></span>').append(menuIcons[id]));}
         var childMenus = [];
         function param(name, type, label, value, values, description, component, onChange) {
             Lampa.SettingsApi.addParam({ component: component || KEY, param: { name: KEY + '_' + name, type: type, 'default': value, values: values, placeholder: 'Не задано' },
@@ -1981,15 +2150,15 @@
             Lampa.SettingsApi.addParam({ component: component, param: { name: KEY + '_' + name, type: 'button' },
                 field: { name: label, description: description || '' }, onChange: action, onRender: onRender });
         }
-        function submenu(id, title) {
+        function submenu(id, title, iconId) {
             childMenus.push(id);
             Lampa.SettingsApi.addComponent({ component: id, name: title,
-                icon: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M4 4h6l2 3h8v13H4z"/></svg>' });
+                icon: menuIcons[iconId] || LOGO });
             var returnIndex = 0, returnScroll = null;
             buttonParam(KEY, id + '_open', title + ' ›', function () {
                 Lampa.Settings.create(id, { onBack: function () { Lampa.Settings.create(KEY, { last_index: returnIndex, lamplay_scroll: returnScroll }); } });
             }, '', function (item) {
-                item.on('hover:enter', function () {
+                menuIcon(item,iconId);item.on('hover:enter', function () {
                     returnIndex = item.parent().find('.selector').index(item);
                     var scroll = item.closest('.scroll')[0];
                     returnScroll = scroll && scroll.Scroll && scroll.Scroll.position ? scroll.Scroll.position() : null;
@@ -1997,7 +2166,7 @@
             });
         }
         param('card_logo','trigger','Логотип вместо названия в карточке',false,undefined,'Использовать найденный логотип в основной карточке Lampa. Если логотип недоступен, остаётся название.',KEY,updateCardLogos);
-        param('source', 'select', 'Источник по умолчанию', 'kodik', { kodik: 'Kodik', rezka: 'HDrezka', libria: 'AniLibria' });
+        param('source', 'select', 'Источник по умолчанию', 'rezka', { kodik: 'Kodik', rezka: 'HDrezka', libria: 'AniLiberty', filmix: 'Filmix', kinotochka: 'KinoTochka', animedia: 'AniMedia' });
         param('quality', 'select', 'Предпочитаемое качество', '1080', { auto: 'Лучшее доступное', '2160': '2160p', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p' });
         param('button_first', 'trigger', 'Кнопка LamPlay всегда первая', true, undefined,
             'Размещать LamPlay перед остальными кнопками просмотра в карточке.', KEY, updateButtons);
@@ -2014,7 +2183,7 @@
 
         var rezkaMenu = KEY + '_rezka_settings', kodikMenu = KEY + '_kodik_settings';
         var libriaMenu = KEY + '_libria_settings', extraMenu = KEY + '_extra_settings';
-        submenu(rezkaMenu, 'HDrezka'); submenu(kodikMenu, 'Kodik'); submenu(libriaMenu, 'AniLibria'); submenu(extraMenu, 'Дополнительно');
+        submenu(rezkaMenu, 'HDrezka','hdrezka'); submenu(kodikMenu, 'Kodik','kodik'); submenu(libriaMenu, 'AniLiberty','anilibria'); submenu(extraMenu, 'Дополнительно','extra');
         var authIo = new Transport(Lampa, setting), authSession = new RezkaSession(authIo, setting, save, Lampa);
         var passwordDraft = String(setting('rezka_password', '') || ''), authBusy = false, authStatusNode = null, passwordStatusNode = null;
         function rezkaHost() { return hostSetting(setting('rezka_host', ''), 'https://rezka.ag'); }
@@ -2067,10 +2236,13 @@
             'Применяется при включённой фиксации потока. Работа зависит от доступности CDN.', rezkaMenu);
         param('kodik_host', 'input', 'Адрес API', 'https://kodik-api.com', '', '', kodikMenu);
         param('kodik_token', 'input', 'Свой API-токен', '', '', 'Пусто — подбор через get-player. Свой токен включает поиск через API.', kodikMenu);
-        param('libria_host', 'input', 'Адрес API', 'https://api.anilibria.app', '', '', libriaMenu);
+        param('libria_host', 'input', 'Адрес API', 'https://aniliberty.top', '', '', libriaMenu);
+        param('filmix_host','input','Filmix — адрес API','http://filmixapp.cyou','','Гостевой доступ до 480p. Нужны HTTP-версия Lampa и нативные запросы с заголовком User-Agent; обычный браузер не поддерживает его смену.',extraMenu);
+        param('kinotochka_host','input','KinoTochka — сайт','https://kinovibe.cc','','Прямые запросы требуют поддержки сайтом CORS либо нативных запросов устройства.',extraMenu);
+        param('animedia_host','input','AniMedia — сайт','https://amd.online','','Собственный плеер AniMedia. Некоторые релизы используют другие плееры и недоступны.',extraMenu);
         param('timeout', 'select', 'Ожидание ответа', '15', { '10': '10 сек.', '15': '15 сек.', '30': '30 сек.' }, '', extraMenu);
         var ratingsMenu=KEY+'_ratings_settings';
-        submenu(ratingsMenu,'Рейтинг');
+        submenu(ratingsMenu,'Рейтинг','rating');
         var ratingsModule=createIntegratedRatings();
         param('ratings_enabled','trigger','Включить функцию рейтингов',false,undefined,'Приоритет и окраска рейтингов по всей Lampa.',ratingsMenu,function () {ratingsModule.setEnabled(setting('ratings_enabled',false));});
         function ratingsParam(name,type,title,value,values) {param('ratings_'+name,type,title,value,values,'',ratingsMenu,function () {ratingsModule.refresh();});}
@@ -2082,7 +2254,7 @@
         ratingsModule.setEnabled(setting('ratings_enabled',false));
         buttonParam(KEY, 'about', 'О плагине', function () {
             Lampa.Noty.show('LamPlay by WaterFAQ · ' + VERSION + ' · Тестовая версия.');
-        });
+        },'',function(item){menuIcon(item,'about');});
         var settingsObserver = null;
         function arrangeSettings(body) {
             childMenus.forEach(function (id) {
