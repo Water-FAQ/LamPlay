@@ -179,8 +179,8 @@ async function interfaceTests(){
         const r=Object.values(h.m.values.lamplay_resume)[0];assert.equal(r.time,1500);assert.equal(r.duration,1800);assert.equal(r.number,'1');assert.equal(r.voice.id,'1');assert.equal(r.source,'rezka');
     });
     h.L.Player.listener.send('close',{});
-    test('Closing playback refreshes both episode progress and Continue block',()=>{assert.match(h.$('.lp-remaining').text(),/Осталось 5 мин/);assert.equal(h.$('.lp-runtime').first().text(),'25:00 / 30:00');assert.equal(h.$('.lp-percent').first().text(),'83%');assert.equal(h.$('.lp-watched').length,0);});
-    h.m.screen.start();assert.match(h.$('.lp-remaining').text(),/Осталось 5 мин/);
+    test('Closing playback refreshes both episode progress and Continue block',()=>{assert.equal(h.$('.lp-remaining').length,0);assert.equal(h.$('.lp-runtime').first().text(),'25:00 / 30:00');assert.equal(h.$('.lp-percent').first().text(),'83%');assert.equal(h.$('.lp-watched').length,0);});
+    h.m.screen.start();assert.equal(h.$('.lp-remaining').length,0);
     h.m.click('Продолжить');await settle();
     test('Explicit Continue restores source/voice/season and seeks the stored time',()=>{
         assert.equal(h.m.played.length,2);assert.equal(h.m.played.at(-1)._lpResumeAt,1500);h.m.progress(0,1800);assert.equal(h.m.seek,1500);

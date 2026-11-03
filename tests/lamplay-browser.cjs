@@ -25,7 +25,7 @@ const fs=require('fs'),assert=require('assert/strict');
  r=await page.evaluate(()=>{while(document.querySelector('.lamplay').dataset.view!=='vertical')mock.click('Вид:');const pane=document.querySelector('.lp-body-pane'),last=document.querySelector('.lp-episode:last-child');jQuery(last).trigger('hover:focus');let a=last.getBoundingClientRect(),b=pane.getBoundingClientRect();return {count:document.querySelectorAll('.lp-episode').length,top:pane.scrollTop,visible:a.bottom<=b.bottom+2};});assert.equal(r.count,176);assert.ok(r.top>0&&r.visible);console.log('PASS all 176 rows remain reachable and visible when focused');
  for(const size of [{width:1920,height:1080},{width:960,height:540},{width:390,height:844}]) {
    await page.setViewportSize(size);await page.waitForTimeout(80);
-   const fit=await page.evaluate(()=>{const pane=document.querySelector('.lp-body-pane'),node=document.querySelector('.lp-episode:last-child');jQuery(node).trigger('hover:focus');const p=pane.getBoundingClientRect(),n=node.getBoundingClientRect();return p.bottom<=innerHeight+1 && n.bottom<=p.bottom+2;});
+   const fit=await page.evaluate(()=>{const pane=document.querySelector('.lp-body-pane'),node=document.querySelector('.lp-episode:last-child');jQuery(node).trigger('hover:focus');const p=pane.getBoundingClientRect(),n=node.getBoundingClientRect();return innerWidth<=900 ? n.bottom<=innerHeight+2 : p.bottom<=innerHeight+1 && n.bottom<=p.bottom+2;});
    assert.ok(fit,JSON.stringify(size));
  }
  console.log('PASS focused rows fit 1080p, 540p and mobile viewports');

@@ -1,10 +1,10 @@
-/* LamPlay by WaterFAQ - 0.7.0 (experimental)
+/* LamPlay by WaterFAQ - 0.8.0 (experimental)
  * Independent Lampa plugin. Direct connections only; no proxy or remote code execution.
  * Providers: HDrezka, Kodik, AniLiberty, Filmix, CDNvideohub, KinoTochka, AniMedia.
  */
 (function (root) {
     'use strict';
-    var VERSION = '0.7.0';
+    var VERSION = '0.8.0';
     var KEY = 'lamplay';
     var NAME = 'LamPlay';
     var PLAY = '<svg class="lp-play" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 3v18l15-9z"/></svg>';
@@ -250,6 +250,7 @@
         };
         this.confirmed = function (host) { return state(host).confirmed === true; };
         this.login = function (host, login, password, done, fail) {
+            var pending=state(host);pending.confirmed=false;pending.unknown=true;store(host,pending);
             var self = this;
             io.request(host + '/ajax/login/', { login_name: login, login_password: password, login_not_save: 0 }, 'json', function (response) {
                 if (!(response && (flag(response.success) || /уже авторизован/i.test(response.message || '')))) {
@@ -270,6 +271,7 @@
             }, fail, self.options(host + '/ajax/login/'));
         };
         this.logout = function (host, done, fail) {
+            var pending=state(host);pending.confirmed=false;pending.unknown=true;store(host,pending);
             var self = this;
             io.request(host + '/logout/', null, 'text', function (html) {
                 try { cleanPage(html); } catch (e) { return fail(e); }
@@ -342,7 +344,7 @@
             }, function (xhr, reason) {
                 var status = xhr && xhr.status;
                 var message = reason === 'timeout' ? 'Источник не ответил вовремя.' : status ? 'Источник вернул HTTP ' + status + '.' :
-                    'Не удалось выполнить прямой запрос. Возможны CORS, ошибка TLS или недоступность источника.';
+                    'Не удалось прочитать ответ '+origin(url)+'. Браузер мог заблокировать запрос, либо сайт недоступен. Проверьте доступность источника и зеркало.';
                 end(new Error(message));
             }, data ? form(data) : false, params);
         };
@@ -679,12 +681,12 @@
                 if (!release || typeof release !== 'object') return fail(new Error('AniLiberty: неожиданный ответ релиза.'));
                 if (release.is_blocked_by_geo || release.is_blocked_by_copyrights) return fail(new Error('AniLiberty сообщила об ограничении доступа к релизу.'));
                 var episodes = list(release.episodes).slice().sort(function (a, b) { return +a.ordinal - +b.ordinal; });
-                done({ id: result.id, title: result.title, episodes: episodes, voices: [{ id: 'libria', title: 'AniLiberty' }] });
+                done({ id: result.id, title: result.title, image:absolute(release.poster && (release.poster.optimized && release.poster.optimized.src || release.poster.src),'https://aniliberty.top'), episodes: episodes, voices: [{ id: 'libria', title: 'AniLiberty' }] });
             }, fail);
         };
         this.episodes = function (release, voice, done) {
             done(release.episodes.map(function (ep) { return { season: '1', number: ep.ordinal,
-                title: 'Серия ' + ep.ordinal + (ep.name ? ' · ' + ep.name : ''), data: ep, voice: voice }; }));
+                title: 'Серия ' + ep.ordinal + (ep.name ? ' · ' + ep.name : ''), image:absolute(ep.preview && (ep.preview.optimized && ep.preview.optimized.src || ep.preview.src),'https://aniliberty.top'), duration:+ep.duration || 0, data: ep, voice: voice }; }));
         };
         this.resolve = function (release, episode, done, fail) {
             var map = {};
@@ -980,10 +982,11 @@
                 nativeBackground=nativeImage.clone().removeAttr('id').removeClass('dim').addClass('lp-native-background');
                 nativeBackground.css({position:'fixed',left:(rect.left/root.innerWidth*100)+'vw',top:(rect.top/root.innerHeight*100)+'vh',width:(rect.width/root.innerWidth*100)+'vw',height:(rect.height/root.innerHeight*100)+'vh',margin:0,transform:'none',transition:'none',opacity:style.opacity,zIndex:0});
             }
+            var errorMessage = '', resizeTimer = null;
             var busy = false, destroyed = false, last = null, generation = 0, reverse = false, pendingResume = null;
             var cache = {}, probeQueue = [], probing = 0, observed = null, metadata = { details: movie, seasons: {}, id: null, request: 0, signature: '' };
             var type = /^(tv|movie)$/.test(movie.media_type) ? movie.media_type : movie.name || movie.first_air_date ? 'tv' : 'movie';
-            var html = $('<div class="lamplay"></div>'), backdrop = $('<div class="lp-backdrop"></div>');
+            var html = $('<div class="lamplay lp-scroll"></div>'), backdrop = $('<div class="lp-backdrop"></div>');
             var top = $('<div class="lp-top"></div>');
             var panel = $('<div class="lp-panel"></div>'), side = $('<aside class="lp-side"></aside>');
             var hero = $('<div class="lp-hero"></div>'), main = $('<main class="lp-main"></main>');
@@ -1010,6 +1013,7 @@
             }
             function control(label, action, target, selected) {
                 var node = interactive($('<div class="lamplay__control"></div>').text(label),action);
+                var split=label.indexOf(': ');if(split>0)node.empty().append($('<span class="lp-control-label"></span>').text(label.slice(0,split)+':'),$('<span class="lp-control-value"></span>').text(label.slice(split+2)));
                 node.attr('data-lp-control',label.indexOf('Вид:')===0?'view':label.indexOf('Источник:')===0?'source':label);
                 if (selected) node.addClass('lp-selected');
                 (target || tools).append(node);return node;
@@ -1045,6 +1049,8 @@
             }
             function changeGeneration() { generation++;stopProbes();io.clear(); }
             function setStatus(message,error) {
+                errorMessage=error?message:'';
+                if(error){stopProbes();status.detach();body.empty();bodyPane.append(status);}else{status.detach();html.append(status);}
                 statusText.text(message || '');status.toggle(!!message);status.toggleClass('lp-error',!!error).toggleClass('lp-busy',busy);
                 status.find('.lp-retry').remove();
                 if (error && retryAction) status.append(interactive($('<span class="lp-retry">Повторить попытку</span>'),function () { retryAction(); }));
@@ -1081,7 +1087,9 @@
                 if (bg && bg!==lastBackground && Lampa.Background && Lampa.Background.change) {Lampa.Background.change(bg);lastBackground=bg;}
             }
             function releaseBackground() { lastBackground='';$('body').removeClass('lp-active lp-card-background');if(nativeBackground) nativeBackground.detach(); }
-            function fitStrip() {top.css('min-height','');}
+            function fitStrip() {top.css('min-height','');setTimeout(function(){if(destroyed)return;html.find('.lp-control-value').each(function(){$(this).toggleClass('lp-clipped',this.scrollWidth>this.clientWidth+1);});},0);}
+            function resized(){clearTimeout(resizeTimer);resizeTimer=setTimeout(function(){if(!destroyed){layout();if(last && html[0].contains(last))focusNode(last);}},100);}
+            $(root).on('resize.lamplay',resized);
             function controlTarget(id) { return filters.add(tools).find('[data-lp-control]').filter(function () {return $(this).attr('data-lp-control')===id;}).first(); }
             function searchMenu() {
                 var options = searchNames(movie).map(function (q) {return {title:q,value:q};});
@@ -1103,7 +1111,7 @@
                     var voicesStrip = $('<div class="lp-strip-group"><div class="lp-caption">Перевод</div><div class="lp-scroll lp-strip"></div></div>');
                     release.voices.forEach(function (v) {control(v.title,function () {voice=v;loadEpisodes();},voicesStrip.find('.lp-strip'),String(v.id)===String(voice.id));});
                     filters.append(seasonStrip,voicesStrip);
-                } else if (!resultsVisible && series()) {
+                } else if (busy && !resultsVisible && series()) {
                     ['Сезоны','Перевод'].forEach(function(label){filters.append($('<div class="lp-strip-group lp-loading-group"><div class="lp-caption"></div><div class="lp-strip"><div class="lamplay__control">Загрузка</div></div></div>').find('.lp-caption').text(label).end());});
                 }
                 control('Источник: '+source.title,function () {
@@ -1112,13 +1120,13 @@
                     });
                 });
                 if (release && series()) control('Порядок: '+(reverse?'Обратный':'Стандартный'),function () {reverse=!reverse;renderEpisodes();});
-                if (release) control('Вид: '+({horizontal:'Горизонтальный',vertical:'Вертикальный',card:'Карточка'}[view()]),function () {
+                control('Вид: '+({horizontal:'Лента',vertical:'Список',card:'Витрина'}[view()]),function () {
                     var names=series()?['horizontal','vertical','card']:['vertical','card'];
                     var next=names[(names.indexOf(view())+1)%names.length];
-                    save(series()?'view_series':'view_movie',next);lastControl='view';renderEpisodes(lastEpisodeKey);
+                    save(series()?'view_series':'view_movie',next);lastControl='view';if(errorMessage){refreshControls();renderHero();self.start();}else if(release)renderEpisodes(lastEpisodeKey);else{refreshControls();renderHero();self.start();}
                 });
                 control('Сбросить фильтр',function () {query=initialQuery;pendingResume=null;search();});
-                control(query,searchMenu).attr({'aria-label':'Поиск: '+query,'data-lp-control':'search'}).addClass('lp-search').prepend('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/></svg>');
+                control(query,searchMenu).wrapInner('<span class="lp-control-value"></span>').attr({'aria-label':'Поиск: '+query,'data-lp-control':'search'}).addClass('lp-search').prepend('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/></svg>');
                 if (release) control('К результатам',backToResults);
                 if (busy) control('Отменить',cancel);
                 layout();if(restoreControl) {var restored=controlTarget(restoreControl);if(restored.length) last=restored[0];}
@@ -1230,7 +1238,7 @@
             function renderHero() {
                 var onContinue=last && $(last).hasClass('lp-continue');
                 hero.empty();var d=metadata.details, resume=savedResume();
-                var image=imageURL(d.backdrop_path || d.poster_path,'w780');
+                var image=imageURL(d.backdrop_path || d.poster_path,'w780') || release && release.image || '';
                 hero.removeClass('lp-has-cover');
                 if (image && view()!=='card') hero.append(setImage($('<img class="lp-cover" alt="">').on('load',function () {hero.addClass('lp-has-cover');}),image));
                 var content=$('<div class="lp-hero-content"></div>'), title=$('<div class="lp-title-slot"></div>');
@@ -1244,9 +1252,9 @@
                     row.append(interactive($('<div class="lp-continue"></div>').append(PLAY,$('<span></span>').text(label)),resume?resumePlay:function(){play(ep);}));
                     if (resume) {
                         info.append($('<div class="lp-resume-title"></div>').text(resume.episodeTitle || ''));
-                        info.append($('<div class="lp-resume-detail"></div>').text([resume.sourceTitle,resume.voice.title].filter(Boolean).join(' · ')));
-                        if(resume.time>0 && resume.duration>0) info.append($('<div class="lp-remaining"></div>').append($('<div class="lp-progress"><i></i></div>').find('i').css('width',Math.max(0,Math.min(100,resume.percent))+'%').end(),$('<span></span>').text(progressText(resume,true))));
-                    } else info.append($('<div class="lp-resume-detail"></div>').text(source.title+' · '+(voice && voice.title || '')));
+                        info.append($('<div class="lp-resume-detail"></div>').text([resume.sourceTitle,resume.voice.title].filter(function(v,i,a){return v && a.indexOf(v)===i;}).join(' · ')));
+
+                    } else info.append($('<div class="lp-resume-detail"></div>').text([source.title,voice && voice.title].filter(function(v,i,a){return v && a.indexOf(v)===i;}).join(' · ')));
                 } else info.append($('<div class="lp-resume-detail"></div>').text('Выберите '+(release && !series()?'озвучку':'серию')+' для просмотра'));
                 content.append(row.append(info));hero.append(content);
                 if(onContinue) last=hero.find('.lp-continue')[0];
@@ -1275,12 +1283,12 @@
                     var v=voiceOf(ep), m=series()?detailFor(ep):metadata.details, p=progress(ep);
                     var node=interactive($('<div class="lamplay__item lp-episode"></div>'),function () {play(ep);});
                     node[0]._lpEpisodeKey=streamKey(ep);
-                    var picture=$('<div class="lp-picture"></div>');node.toggleClass('lp-started',+p.time>0);picture.append($('<span class="lp-focus-play"></span>').append(PLAY));
+                    var picture=$('<div class="lp-picture"></div>');node.toggleClass('lp-started',+p.time>0 || +p.percent>0);picture.append($('<span class="lp-focus-play"></span>').append(PLAY));
                     var img=series()?thumbnail(ep):'';
                     if (img) picture.append(setImage($('<img alt="" loading="lazy">'),img));
                     if (series()) picture.append($('<span class="lp-episode-number"></span>').text('S'+ep.season+':E'+ep.number));
                     var badge=$('<span class="lp-quality"></span>');picture.append(badge);
-                    var duration=+p.duration || (series()?+m.runtime*60:+m.runtime*60) || 0;
+                    var duration=+p.duration || +m.runtime*60 || +ep.duration || 0;
                     picture.append($('<span class="lp-runtime"></span>').text(+p.time>0?clock(p.time)+' / '+clock(duration):duration?Math.ceil(duration/60)+' мин.':''));
                     if(+p.time>0) picture.append($('<span class="lp-percent"></span>').text(Math.round(+p.percent || p.time/duration*100)+'%'));
                     var line=$('<div class="lp-progress"><i></i></div>');line.find('i').css('width',Math.max(0,Math.min(100,+p.percent||0))+'%');picture.append(line);
@@ -1297,7 +1305,7 @@
                     var meta=$('<div class="lamplay__item-detail lp-episode-meta"></div>').append($('<span></span>').text(series()?(+m.vote_average>0?'★ '+Number(m.vote_average).toFixed(1):''):details[0] || ''));
                     var qualityMeta=$('<span class="lp-quality-meta"></span>');meta.append(qualityMeta,$('<span class="lp-air-date"></span>').text(series()?formatDate(m.air_date || m.release_date):details.slice(1).join(' · ')));
                     if(view()==='vertical') {if(meta.children().first().text() && meta.find('.lp-air-date').text())meta.children().first().after('<span class="lp-meta-separator">•</span>');info.append(meta);}else info.prepend(meta);
-                    var desc=series()?m.overview:m.tagline;
+                    var desc=series()?(m.overview || ep.description):m.tagline;
                     if (series() || desc) info.append($('<div class="lp-description"></div>').text(desc || ''));
                     node.append(picture,info);body.append(node);
                     var task={ep:ep,node:node,badge:badge,qualityMeta:qualityMeta,ticket:ticket,source:source.id,key:streamKey(ep),release:release};node[0]._lpProbe=task;
@@ -1392,7 +1400,7 @@
                         if (destroyed || ticket!==metadata.request) return;metadata.details=d;
                         var logos=list(d.images && d.images.logos);var logo=logos.filter(function (l) {return l.iso_639_1==='ru';})[0] || logos.filter(function (l) {return l.iso_639_1==='en';})[0] || logos[0];
                         metadata.logo=logo && imageURL(logo.file_path,'w500');renderHero();layout();
-                        if (release && !busy) {renderEpisodes(last && last._lpEpisodeKey);if (series()) loadSeasonMetadata(season);}
+                        if (release && !busy && !errorMessage) {renderEpisodes(last && last._lpEpisodeKey);if (series()) loadSeasonMetadata(season);}
                     });
                 }
                 if (directId) return detail(directId);
@@ -1408,7 +1416,7 @@
                 metadata.seasons[String(s)]=[];var ticket=metadata.request;
                 metadataRequest('tv/'+metadata.id+'/season/'+encodeURIComponent(s)+'?language=ru',function (d) {
                     if (destroyed || ticket!==metadata.request) return;metadata.seasons[String(s)]=list(d.episodes);
-                    if (release && String(season)===String(s)) renderEpisodes(last && last._lpEpisodeKey);
+                    if (release && !errorMessage && String(season)===String(s)) renderEpisodes(last && last._lpEpisodeKey);
                 },function () {delete metadata.seasons[String(s)];});
             }
             this.create=function () {activeScreen=self;renderHero();refreshControls();loadMetadata();search();return html;};
@@ -1424,15 +1432,24 @@
                 Lampa.Controller.toggle('content');
             };
             function filterDrawer(){
-                var originNode=last,drawer=$('<div class="lp-drawer" role="dialog" aria-label="Фильтры"><div class="lp-drawer-title">Фильтры</div></div>');
-                function close(){drawer.remove();self.start();if(originNode && html[0].contains(originNode))Lampa.Controller.collectionFocus(originNode,html);}
-                function entry(label,action){var el=$('<div class="selector lp-drawer-item"></div>').text(label).on('hover:enter',function(){close();action();});drawer.append(el);}
-                tools.find('.selector').each(function(){var target=$(this);entry(target.text(),function(){target.trigger('hover:enter');});});
-                if(release && series()){
-                    entry('Сезон · '+season,function(){select('Сезон',seasonList().map(function(s){return {title:'Сезон '+s,value:s};}),season,function(s){season=String(s);loadEpisodes();});});
-                    entry('Перевод · '+(voice && voice.title || ''),function(){select('Перевод',release.voices.map(function(v){return {title:v.title,value:v.id};}),voice && voice.id,function(id){voice=release.voices.filter(function(v){return String(v.id)===String(id);})[0];loadEpisodes();});});
-                }
-                html.append(drawer);Lampa.Controller.add('lamplay_filters',{toggle:function(){Lampa.Controller.collectionSet(drawer);Lampa.Controller.collectionFocus(drawer.find('.selector').first(),drawer);},up:function(){if(root.Navigator.canmove('up'))root.Navigator.move('up');},down:function(){if(root.Navigator.canmove('down'))root.Navigator.move('down');},left:close,back:close});Lampa.Controller.toggle('lamplay_filters');
+                var originNode=last;
+                function close(){self.start();if(originNode && html[0].contains(originNode))Lampa.Controller.collectionFocus(originNode,html);}
+                function show(){
+                    var entries=[{title:'Сбросить фильтр',action:function(){query=initialQuery;pendingResume=null;search();}},
+                        {title:'Источник',subtitle:source.title,items:providers.map(function(p){return {title:p.title,value:p.id,selected:p.id===source.id};}),kind:'source'}];
+                    if(release && series()){
+                        entries.push({title:'Сезон',subtitle:'Сезон '+season,kind:'season',items:seasonList().map(function(s){return {title:'Сезон '+s,value:s,selected:String(s)===String(season)};})});
+                        entries.push({title:'Перевод',subtitle:voice && voice.title || '',kind:'voice',items:release.voices.map(function(v){return {title:v.title,value:v.id,selected:voice && String(v.id)===String(voice.id)};})});
+                    }
+                    Lampa.Select.show({title:'Фильтр',items:entries,onBack:close,onSelect:function(entry){
+                        if(entry.action){close();entry.action();return;}
+                        Lampa.Select.show({title:entry.title,items:entry.items,onBack:show,onSelect:function(item){
+                            close();if(entry.kind==='source'){source=providers.filter(function(p){return p.id===item.value;})[0];saveSource(movie,source.id);pendingResume=null;search();}
+                            else if(entry.kind==='season'){season=String(item.value);loadEpisodes();}
+                            else{voice=release.voices.filter(function(v){return String(v.id)===String(item.value);})[0];loadEpisodes();}
+                        }});
+                    }});
+                }show();
             }
             function move(dir,fallback) {
                 var current=html.find('.selector.focus').first();if(!current.length && last) current=$(last);
@@ -1448,8 +1465,8 @@
             this.back=function () {if (busy && !release) return cancel();changeGeneration();buttonBindings.forEach(function(b){b.focusUntil=1;if(b.startComponent && b.direct) b.startComponent.last=b.direct[0];});Lampa.Activity.backward();setTimeout(function(){buttonBindings.forEach(initialFocus);},0);};
             this.pause=function () {releaseBackground();};this.stop=function () {releaseBackground();};
             var resizeHandler=function(){if(inActivity()) syncBackground(resultsVisible?'results':view());fitStrip();};root.addEventListener('resize',resizeHandler);
-            this.playerClosed=function () {if (release && !busy) renderEpisodes(lastEpisodeKey);else renderHero();};
-            this.destroy=function () {releaseBackground();if(nativeBackground) nativeBackground.remove();root.removeEventListener('resize',resizeHandler);destroyed=true;if (activeScreen===self) activeScreen=null;changeGeneration();metadataIo.clear();html.remove();};
+            this.playerClosed=function () {if (release && !busy && !errorMessage) renderEpisodes(lastEpisodeKey);else renderHero();};
+            this.destroy=function () {$(root).off('resize.lamplay',resized);clearTimeout(resizeTimer);releaseBackground();if(nativeBackground) nativeBackground.remove();root.removeEventListener('resize',resizeHandler);destroyed=true;if (activeScreen===self) activeScreen=null;changeGeneration();metadataIo.clear();html.remove();};
         }
 
         $('<style id="lamplay-style"></style>').text([
@@ -2218,7 +2235,7 @@
             buttonParam(KEY, id + '_open', title + ' ›', function () {
                 Lampa.Settings.create(id, { onBack: function () { Lampa.Settings.create(KEY, { last_index: returnIndex, lamplay_scroll: returnScroll }); } });
             }, '', function (item) {
-                menuIcon(item,iconId);if(iconId==='hdrezka'){item.addClass('lp-rezka-settings');item.find('.settings-param__name').append('<span class="lp-auth-dot" aria-label="Вход не подтверждён"></span>');}item.on('hover:enter', function () {
+                menuIcon(item,iconId);item.on('hover:enter', function () {
                     returnIndex = item.parent().find('.selector').index(item);
                     var scroll = item.closest('.scroll')[0];
                     returnScroll = scroll && scroll.Scroll && scroll.Scroll.position ? scroll.Scroll.position() : null;
@@ -2251,7 +2268,7 @@
         var passwordDraft = String(setting('rezka_password', '') || ''), authBusy = false, authStatusNode = null, passwordStatusNode = null;
         function rezkaHost() { return hostSetting(setting('rezka_host', ''), 'https://rezka.ag'); }
         function updateAuthStatus(message) {
-            var confirmed=authSession.confirmed(rezkaHost());$('.lp-rezka-settings .lp-auth-dot').toggleClass('lp-auth-confirmed',confirmed).attr('aria-label',confirmed?'Вход подтверждён':'Вход не подтверждён');
+            var confirmed=!authBusy && authSession.confirmed(rezkaHost());$('.lp-rezka-settings .lp-auth-dot').toggleClass('lp-auth-confirmed',confirmed).attr('aria-label',confirmed?'Вход подтверждён':'Вход не подтверждён');
             if (authStatusNode) authStatusNode.text(message || authSession.status(rezkaHost()));
             if (passwordStatusNode) passwordStatusNode.text(passwordDraft || 'Не задано');
         }
@@ -2291,7 +2308,7 @@
             }, function (error) { authBusy = false; updateAuthStatus(safeError(error)); Lampa.Noty.show(safeError(error)); });
         });
         buttonParam(rezkaMenu, 'rezka_auth_status', 'Состояние входа', function () { updateAuthStatus(); }, '', function (item) {
-            authStatusNode = $('<div class="settings-param__descr"></div>'); item.append(authStatusNode); updateAuthStatus();
+            item.addClass('lp-rezka-settings');item.find('.settings-param__name').append('<span class="lp-auth-dot" aria-label="Вход не подтверждён"></span>');authStatusNode = $('<div class="settings-param__descr"></div>'); item.append(authStatusNode); updateAuthStatus();
         });
         param('prefer_mp4', 'trigger', 'Предпочитать поток MP4', true, undefined, '', rezkaMenu);
         param('rezka_fix_stream', 'trigger', 'Фиксация видеопотока', false, undefined,
@@ -2312,13 +2329,13 @@
             provider.requestToken(function(data){if(closed)return;modal.find('.broadcast__device').text(data.user_code);
                 var expires=Date.now()+Math.max(60000,Math.min(900000,(+data.expire*1000-Date.now())||600000));
                 function poll(){if(closed||inflight)return;if(Date.now()>expires){modal.find('.broadcast__device').text('Код истёк. Откройте привязку заново.');return;}inflight=true;
-                    provider.profile(function(profile){inflight=false;if(closed)return;if(profile.user && profile.user.login){save('filmix_token',data.code);filmixStatus(profile);if(filmixTokenItem && Lampa.Params && Lampa.Params.update)Lampa.Params.update(filmixTokenItem,[],null);close();Lampa.Noty.show('Filmix: устройство привязано');}else timer=setTimeout(poll,10000);},function(){inflight=false;if(!closed)timer=setTimeout(poll,10000);},data.code);
+                    provider.profile(function(profile){inflight=false;if(closed)return;if(profile.user && profile.user.login){save('filmix_token',data.code);filmixStatus(profile);if(filmixTokenItem)filmixTokenItem.find('.settings-param__value').text(data.code);close();Lampa.Noty.show('Filmix: устройство привязано');}else timer=setTimeout(poll,10000);},function(){inflight=false;if(!closed)timer=setTimeout(poll,10000);},data.code);
                 }timer=setTimeout(poll,1000);
             },function(e){if(!closed)modal.find('.broadcast__device').text(safeError(e));});
         });
-        Lampa.SettingsApi.addParam({component:filmixMenu,param:{name:KEY+'_filmix_status',type:'static'},field:{name:'Статус Filmix'},onRender:function(item){filmixStatusItem=item;if(!item.find('.settings-param__value').length)item.append('<div class="settings-param__value"></div>');item.find('.settings-param__value').text(setting('filmix_status','Не авторизован'));}});
+        Lampa.SettingsApi.addParam({component:filmixMenu,param:{name:KEY+'_filmix_status',type:'button'},field:{name:'Статус Filmix'},onRender:function(item){filmixStatusItem=item;if(!item.find('.settings-param__value').length)item.append('<div class="settings-param__value"></div>');item.find('.settings-param__value').text(setting('filmix_status','Не авторизован'));}});
         param('filmix_host','input','Filmix - адрес API','http://filmixapp.cyou','','Адрес сервиса API. Для HTTP-адреса сама Lampa также должна быть открыта по HTTP.',filmixMenu);
-        Lampa.SettingsApi.addParam({component:filmixMenu,param:{name:KEY+'_filmix_token',type:'input',default:''},field:{name:'Токен устройства Filmix',description:'Сохраняется автоматически после привязки устройства.'},onRender:function(item){filmixTokenItem=item;},onChange:function(){filmixStatus(null);}});
+        Lampa.SettingsApi.addParam({component:filmixMenu,param:{name:KEY+'_filmix_token',type:'input',default:'',values:''},field:{name:'Токен устройства Filmix',description:'Сохраняется автоматически после привязки устройства.'},onRender:function(item){filmixTokenItem=item;},onChange:function(){filmixStatus(null);}});
         param('filmix_device_id','input','Идентификатор устройства',setting('filmix_device_id',''),'','Сохраняется между запусками. Для токена укажите связанный с ним идентификатор устройства.',filmixMenu);
         buttonParam(filmixMenu,'filmix_profile','Проверить доступ аккаунта',function(){var network=new Transport(Lampa,setting);new Filmix(network,setting).profile(function(p){Lampa.Noty.show('Filmix: '+filmixStatus(p));},function(e){Lampa.Noty.show(safeError(e));});},'Проверяет токен прямым запросом к API Filmix.');
         param('kinotochka_host','input','KinoTochka - сайт','https://kinovibe.cc','','Прямые запросы требуют поддержки сайтом CORS либо нативных запросов устройства.',extraMenu);
@@ -2338,6 +2355,7 @@
             Lampa.Noty.show('LamPlay by WaterFAQ · ' + VERSION + ' · Тестовая версия.');
         },'',function(item){menuIcon(item,'about');});
         $('<style></style>').text('.lamplay[data-view=card] .lamplay__control{min-height:2.3em;padding:.45em .7em}.lamplay[data-view=card] .lp-strip{padding-top:.1em;padding-bottom:.1em}.lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{display:flex;align-items:flex-end;padding-bottom:.6em}.lp-series[data-view=horizontal] .lp-episode-info,.lp-series[data-view=card] .lp-episode-info{height:7.8em;flex:none;box-sizing:border-box}@media(max-height:650px){.lp-series[data-view=horizontal] .lp-episode-info,.lp-series[data-view=card] .lp-episode-info{height:7em}}.full-start-new__body.lp-poster-stable{align-items:flex-start!important}.lp-series[data-view=horizontal] .lp-description,.lp-series[data-view=card] .lp-description{height:3.9em}.lp-series[data-view=horizontal] .lp-episode-meta,.lp-series[data-view=card] .lp-episode-meta{min-height:1.3em}.lp-series[data-view=horizontal] .lamplay__item-title,.lp-series[data-view=card] .lamplay__item-title{height:2.4em}.lp-picture{background:rgba(255,255,255,.08)}.lp-auth-dot{display:inline-block;width:.55em;height:.55em;margin-left:.6em;border-radius:50%;background:#ef5350;vertical-align:middle}.lp-auth-dot.lp-auth-confirmed{background:#4caf50}.lamplay__status.lp-error{pointer-events:auto}.lp-retry{display:inline-flex;align-items:center;min-height:2.5em;padding:.35em .7em;margin-left:.5em;border:1px solid currentColor;border-radius:.3em}.lp-drawer{position:absolute;right:0;top:0;bottom:0;width:28em;max-width:42vw;background:rgba(27,29,38,.98);z-index:25;padding:1em;overflow:auto}.lp-drawer-title{font-size:1.4em;margin-bottom:1em}.lp-drawer-item{padding:1em;min-height:3em;display:flex;align-items:center;border-radius:.25em}.lp-drawer-item.focus{background:#fff;color:#111}.lp-original-title{min-height:1.25em}.lp-original-title:empty{opacity:.25}').appendTo('head');
+        $('<style></style>').text("/* Shared geometry and readable filter values. */\n.lamplay__control{gap:.35em;overflow:hidden;min-width:0}\n.lp-control-label{flex:none}.lp-control-value{opacity:.72;min-width:0;overflow:hidden;white-space:nowrap;display:block;mask-image:linear-gradient(to right,#000 calc(100% - .8em),transparent);-webkit-mask-image:linear-gradient(to right,#000 calc(100% - .8em),transparent)}\n.lamplay__control.focus .lp-control-value{opacity:.65}.lp-search svg{flex:none}\n.lamplay[data-view=vertical] .lp-side,.lamplay[data-view=results] .lp-side{width:34%;overflow-y:auto;padding:.25em}\n.lamplay[data-view=vertical] .lp-hero,.lamplay[data-view=results] .lp-hero,.lp-series[data-view=horizontal] .lp-top>.lp-hero{width:100%;height:auto;min-height:0;max-height:none;aspect-ratio:16/9;flex:none}\n.lp-series[data-view=horizontal] .lp-top>.lp-hero{width:34%;align-self:flex-start}\n.lp-series[data-view=horizontal] .lp-top{height:auto;min-height:0}\n.lamplay[data-view=vertical] .lp-resume-row,.lamplay[data-view=results] .lp-resume-row,.lp-series[data-view=horizontal] .lp-resume-row{flex-direction:row;align-items:center;gap:.6em;font-size:.9em}\n.lp-resume-row .lp-continue{font-size:.9em;flex-shrink:0;max-width:100%}.lp-resume-info{overflow:hidden}.lp-resume-title{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}\n.lp-hero-content{padding:.8em}.lp-title-slot{flex-shrink:1;min-height:0}.lp-title-logo{max-height:100%}\n.lamplay[data-view=vertical] .lp-title-slot,.lamplay[data-view=results] .lp-title-slot,.lp-series[data-view=horizontal] .lp-title-slot{height:2.5em;width:65%}\n.lp-series[data-view=horizontal] .lp-filters{justify-content:space-between;gap:.65em}\n.lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{padding:1em .65em .6em}\n.lp-picture{transition:transform .16s ease;transform-origin:center bottom}\n.lp-series[data-view=horizontal] .lp-episode.focus .lp-picture,.lp-series[data-view=card] .lp-episode.focus .lp-picture{transform:scale(1.045)}\n.lp-series[data-view=vertical] .lp-episode{transition:transform .16s ease;transform-origin:center;position:relative;border-color:transparent;outline:none}\n.lp-series[data-view=vertical] .lp-episode.lp-started{box-shadow:0 0 0 1px rgba(255,255,255,.48)}\n.lp-series[data-view=vertical] .lp-episode.focus,.lp-series[data-view=vertical] .lp-episode:focus{background:rgba(0,0,0,.35);color:#fff;border-color:transparent;box-shadow:0 0 0 .16em #fff;transform:scale(1.015);z-index:1}\n.lp-series[data-view=vertical] .lp-episode.focus .lamplay__item-detail{color:rgba(255,255,255,.8)}\n.lp-series[data-view=vertical] .lp-body-pane{padding:.65em}\nbody.lp-card-background .lp-native-background{filter:brightness(.86)!important;mask-image:radial-gradient(ellipse at 56% 42%,#000 30%,rgba(0,0,0,.78) 65%,rgba(0,0,0,.15) 100%)!important;-webkit-mask-image:radial-gradient(ellipse at 56% 42%,#000 30%,rgba(0,0,0,.78) 65%,rgba(0,0,0,.15) 100%)!important}\n.lamplay__status.lp-error{position:static;transform:none;max-width:100%;width:100%;align-self:stretch;box-sizing:border-box;margin:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1em;padding:1.5em;text-align:center;box-shadow:none;background:rgba(35,23,27,.85);min-height:9em}\n.lamplay__status.lp-error>span:first-child{max-width:38em;line-height:1.45;overflow-wrap:anywhere}\n.lp-error .lp-retry{margin:0;padding:.65em 1.1em;text-decoration:none;border:2px solid rgba(255,255,255,.65);border-radius:.4em;line-height:1.25;justify-content:center;color:#fff;background:transparent}\n.lamplay .lp-error .lp-retry.focus,.lamplay .lp-error .lp-retry:focus{background:#fff;color:#111;border-color:#fff}\n/* Narrow or shallow windows use document flow, with room for Lampa navigation. */\n@media(max-width:900px),(max-height:500px){\n.lamplay{overflow-y:auto;height:100%;font-size:1em;padding-bottom:6em;box-sizing:border-box}\n.lp-panel{height:auto;min-height:100%;padding:.65em;overflow:visible}\n.lp-main,.lp-side{overflow:visible!important}.lp-body-pane{overflow:visible;flex:none;min-height:0}\n.lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{align-items:flex-start;overflow-x:auto;overflow-y:hidden;flex:none;padding:1em .6em}\n.lp-series[data-view=horizontal] .lp-episode,.lp-series[data-view=card] .lp-episode{width:38vw;min-width:11em;max-width:20em}\n.lp-series[data-view=horizontal] .lp-picture,.lp-series[data-view=card] .lp-picture{height:auto;aspect-ratio:16/9}\n.lp-series[data-view=horizontal] .lp-filters{justify-content:flex-start;gap:.7em}\n.lamplay[data-view=card] .lp-resume-row{flex-wrap:wrap}.lamplay[data-view=card] .lp-top{gap:.7em}\n.lamplay[data-view=vertical] .lp-resume-row,.lamplay[data-view=results] .lp-resume-row,.lp-series[data-view=horizontal] .lp-resume-row{flex-wrap:wrap}\n.lamplay[data-view=vertical] .lp-side,.lamplay[data-view=results] .lp-side{width:34%}\n.lp-hero-content{padding:.5em}.lp-hero .lp-continue{font-size:.8em;min-height:2.4em;padding:.35em .5em}\n}\n@media(max-width:600px){\n.lp-panel,.lp-top{flex-direction:column!important;height:auto!important}\n.lamplay[data-view=vertical] .lp-side,.lamplay[data-view=results] .lp-side,.lp-series[data-view=horizontal] .lp-top>.lp-hero{width:100%}\n.lp-hero{aspect-ratio:16/9;min-height:0!important}.lp-main{flex:none;width:100%}\n.lamplay[data-view=vertical] .lp-tools,.lamplay[data-view=results] .lp-tools{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible}\n.lamplay[data-view=vertical] .lp-tools>.lamplay__control{height:2.8em;font-size:1em}\n.lp-series[data-view=vertical] .lp-picture{width:30%;min-width:0;height:auto;aspect-ratio:16/9;align-self:center}\n.lp-series[data-view=vertical] .lp-episode-info{font-size:.85em;padding:.35em;position:relative}\n.lp-series[data-view=vertical] .lp-row-duration{position:static;float:right;margin-left:.5em}\n.lp-series[data-view=horizontal] .lp-episode,.lp-series[data-view=card] .lp-episode{width:68vw;min-width:0}\n.lp-series[data-view=horizontal] .lp-resume-row,.lamplay[data-view=vertical] .lp-resume-row,.lamplay[data-view=results] .lp-resume-row{flex-wrap:nowrap;font-size:1em}\n.lp-series[data-view=horizontal] .lp-hero .lp-continue,.lamplay[data-view=vertical] .lp-hero .lp-continue{font-size:.9em}\n.lamplay[data-view=card] .lp-title-slot{height:auto;min-height:2.8em}.lamplay[data-view=card] .lp-title-logo{max-height:3em}\n}\n.lp-control-value{mask-image:none;-webkit-mask-image:none}.lp-control-value.lp-clipped{mask-image:linear-gradient(to right,#000 calc(100% - .8em),transparent);-webkit-mask-image:linear-gradient(to right,#000 calc(100% - .8em),transparent)}\n.lamplay[data-view=vertical] .lp-side,.lamplay[data-view=results] .lp-side{padding:0}\n").appendTo('head');
         var settingsObserver = null;
         function arrangeSettings(body) {
             childMenus.forEach(function (id) {
