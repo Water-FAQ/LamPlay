@@ -4,7 +4,7 @@
  */
 (function (root) {
     'use strict';
-    var VERSION = '0.8.0';
+    var VERSION = '0.9.0';
     var KEY = 'lamplay';
     var NAME = 'LamPlay';
     var PLAY = '<svg class="lp-play" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 3v18l15-9z"/></svg>';
@@ -300,7 +300,7 @@
         this.request = function (url, data, type, done, fail, extra) {
             if (!absolute(url)) return fail(new Error('Некорректный адрес источника.'));
             if (root.location && root.location.protocol === 'https:' && /^http:/.test(url)) {
-                return fail(new Error('Lampa открыта по HTTPS, а источник - по HTTP. Укажите HTTPS-адрес источника.'));
+                return fail(new Error('Lampa открыта по HTTPS, а источник — по HTTP. Для прямого доступа к этому HTTP-источнику откройте Lampa по HTTP.'));
             }
             var request = new Lampa.Reguest();
             var ticket = generation, finished = false;
@@ -321,8 +321,9 @@
             request.timeout(timeout);
             var params = { dataType: type || 'json' };
             if (extra) Object.keys(extra).forEach(function (key) {
-                if (key !== 'onHeaders' && key !== 'browserRequest') params[key] = extra[key];
+                if (key !== 'onHeaders' && key !== 'browserRequest' && key !== 'nativeOnlyHeaders') params[key] = extra[key];
             });
+            if(extra && extra.nativeOnlyHeaders && !(Lampa.Platform && Lampa.Platform.is('android')))delete params.headers;
             request[extra && extra.browserRequest ? 'silent' : 'native'](url, function (value) {
                 if (finished || ticket !== generation) return;
                 try {
@@ -730,34 +731,35 @@
             var host=hostSetting(settings('filmix_host',''),'http://filmixapp.cyou').replace(/\/api\/v2$/i,'');
             var query={user_dev_id:dev,user_dev_name:'Xiaomi',user_dev_token:authToken===undefined?token():authToken,user_dev_vendor:'Xiaomi',user_dev_os:'14',user_dev_apk:'2.2.0',app_lang:'ru-rRU'};
             Object.keys(params||{}).forEach(function(k){query[k]=params[k];});
-            io.request(host+'/api/v2/'+path+'?'+form(query),null,'json',done,function(e){fail(new Error('Filmix ('+path+'): '+safeError(e)));},{headers:{'User-Agent':'okhttp/3.10.0'}});
+            io.request(host+'/api/v2/'+path+'?'+form(query),null,'json',done,function(e){fail(new Error('Filmix ('+path+'): '+safeError(e)));},{headers:{'User-Agent':'okhttp/3.10.0'},nativeOnlyHeaders:true});
         }
-        this.search=function(query,movie,done,fail){api('search',{story:query},function(rows){
-            if(!Array.isArray(rows)) return fail(new Error('Filmix: поиск недоступен.'));
-            done(rank(rows.map(function(r){return {id:r.id,title:r.title,original:r.original_title,year:r.year,description:r.short_story};}),movie));
-        },fail);};
+        this.search=function(query,movie,done,fail){
+            function display(rows){done(rank(rows.map(function(r){return {id:r.id,title:r.title,original:r.orig_title || r.original_title || r.original_name,year:r.year,description:r.short_story};}),movie));}
+            function siteSearch(previous){io.request('https://filmix.gg/api/v2/suggestions?search_word='+encodeURIComponent(query),null,'json',function(data){display(list(data && data.posts));},function(e){if(previous===null)fail(e);else display(previous);},{headers:{'X-Requested-With':'XMLHttpRequest'}});}
+            api('search',{story:query},function(rows){if(Array.isArray(rows) && rows.length)display(rows);else siteSearch(Array.isArray(rows)?rows:null);},function(){siteSearch(null);});
+        };
         this.profile=function(done,fail,authToken){api('user_profile',{},function(data){var user=data && data.user_data;maxHeight=user?(flag(user.is_pro_plus)?2160:flag(user.is_pro)?1080:720):480;done({user:user,maxHeight:maxHeight});},fail,authToken);};
         this.requestToken=function(done,fail){api('token_request',{},function(data){if(!data || data.status!=='ok' || !data.code || !data.user_code) return fail(new Error('Filmix: не удалось получить код привязки.'));done(data);},fail,'');};
         var provider=this;
         this.open=function(result,done,fail){
-            if(settings('filmix_token','')) return provider.profile(function(){openPost(result,done,fail);},fail);
+            if(settings('filmix_token','')) return provider.profile(function(){openPost(result,done,fail);},function(){maxHeight=480;openPost(result,done,fail);});
             maxHeight=480;openPost(result,done,fail);
         };
-        function openPost(result,done,fail){api('post/'+encodeURIComponent(result.id),{},function(data){
+        function openPost(result,done,fail,retried){api('post/'+encodeURIComponent(result.id),retried?{_lp_retry:Date.now()}:{},function(data){
             var links=data && data.player_links;
             if(!links) return fail(new Error('Filmix: ответ post/'+result.id+' не содержит player_links. '+(data && data.message || 'Проверьте доступ аккаунта.')));
             var voices=[],rows=[],seen={};
             function add(id,title,season,number,file){id=String(id);if(!seen[id]) {seen[id]=true;voices.push({id:id,title:title || id});}rows.push({season:String(season),number:String(number),title:'Серия '+number,data:file,voice:{id:id,title:title || id}});}
             if(links.playlist && Object.keys(links.playlist).length) {
-                Object.keys(links.playlist).forEach(function(s,si){Object.keys(links.playlist[s]).forEach(function(v){Object.keys(links.playlist[s][v]).forEach(function(e,ei){var f=links.playlist[s][v][e];add(v,v,+s || si+1,+e || ei+1,f);});});});
+                Object.keys(links.playlist).forEach(function(s,si){Object.keys(links.playlist[s]).forEach(function(v){Object.keys(links.playlist[s][v]).forEach(function(e,ei){var f=links.playlist[s][v][e],match=String(f.link||'').match(/s(\d+)e(\d+)_/i);if(!f.link)return;add(v,v,parseInt(s,10) || match && +match[1] || si+1,parseInt(e,10) || match && +match[2] || ei+1,f);});});});
             } else list(links.movie).forEach(function(f,i){add(i,f.translation,0,1,f);});
-            if(!rows.length) return fail(new Error('Filmix: post/'+result.id+' вернул пустой плейлист (movie и playlist). '+(settings('filmix_token','')?'Проверьте статус аккаунта и доступность записи.':'Привяжите устройство в настройках Filmix и повторите запрос.')));
-            done({id:result.id,title:result.title,series:rows[0].season!=='0',voices:voices,rows:rows});
-        },fail);};
+            if(!rows.length){if(!retried)return openPost(result,done,fail,true);return fail(new Error('Filmix: для этой записи нет доступных видеопотоков (пустой плейлист, post/'+result.id+').'));}
+            done({id:result.id,title:result.title,series:rows[0].season!=='0',voices:voices,rows:rows,maxHeight:maxHeight});
+        },function(e){if(!retried && /HTTP (404|50\d)/.test(safeError(e)))return openPost(result,done,fail,true);fail(e);});};
         this.episodes=function(release,voice,done){done(release.rows.filter(function(e){return e.voice.id===String(voice.id);}));};
         this.resolve=function(release,ep,done,fail){
             var file=ep.data.link || '',quality={},match=file.match(/\[([\d,]+)\]/),heights=match?match[1].split(','):list(ep.data.qualities);
-            heights.map(Number).filter(function(n){return n>0 && n<=maxHeight;}).forEach(function(h){var u=absolute(file.replace(/\[[\d,]+\]|%s/,String(h)));if(u) quality[h+'p']=u;});
+            heights.map(Number).filter(function(n){return n>0 && n<=(release.maxHeight || maxHeight);}).forEach(function(h){var u=absolute(file.replace(/\[[\d,]+\]|%s/,String(h)));if(u) quality[h+'p']=u;});
             // Public guest access is limited to 480p; account-only qualities are not advertised.
             if(!Object.keys(quality).length) return fail(new Error('Filmix: нет видеоссылок в доступном аккаунту качестве.'));
             done({quality:quality,subtitles:[]});
@@ -866,6 +868,16 @@
     function keepVisible(pane,target) {
         if (!pane || !target || !pane.contains(target)) return;
         var box=pane.getBoundingClientRect(),rect=target.getBoundingClientRect(),gap=8;
+        if (pane.classList.contains('lp-body-pane') && target.classList.contains('lp-episode')) {
+            var horizontal=pane.closest('.lamplay').getAttribute('data-view')!=='vertical';
+            var dest=horizontal?pane.scrollLeft+rect.left-box.left+(rect.width-pane.clientWidth)/2:pane.scrollTop+rect.top-box.top+(rect.height-pane.clientHeight)/2;
+            dest=Math.max(0,Math.min(dest,horizontal?pane.scrollWidth-pane.clientWidth:pane.scrollHeight-pane.clientHeight));
+            if (pane._lpScrollFrame) root.cancelAnimationFrame(pane._lpScrollFrame);
+            var from=horizontal?pane.scrollLeft:pane.scrollTop,started=null;
+            function tick(now){if(started===null)started=now;var t=Math.min(1,(now-started)/180),pos=from+(dest-from)*(1-Math.pow(1-t,3));if(horizontal)pane.scrollLeft=pos;else pane.scrollTop=pos;if(t<1)pane._lpScrollFrame=root.requestAnimationFrame(tick);else pane._lpScrollFrame=null;}
+            if(root.requestAnimationFrame)pane._lpScrollFrame=root.requestAnimationFrame(tick);else if(horizontal)pane.scrollLeft=dest;else pane.scrollTop=dest;
+            return;
+        }
         if (pane.scrollHeight>pane.clientHeight && !(pane.classList.contains('lp-body-pane') && pane.closest('.lamplay') && /^(horizontal|card)$/.test(pane.closest('.lamplay').getAttribute('data-view')))) {
             if (rect.bottom>box.bottom-gap) pane.scrollTop+=rect.bottom-box.bottom+gap;
             if (rect.top<box.top+gap) pane.scrollTop-=box.top-rect.top+gap;
@@ -878,7 +890,22 @@
         }
     }
 
-    var Core = { exactResult: exactResult, searchNames: searchNames, maxQuality: maxQuality, keepVisible: keepVisible, progressText: progressText, VERSION: VERSION, form: form, absolute: absolute, hostSetting: hostSetting, rank: rank,
+    function episodeHash(movie,season,number,isSeries,hash) {
+        var title=movie.original_title || movie.original_name || movie.title || movie.name || '';
+        return hash(isSeries?[season,+season>10?':':'',number,title].join(''):title);
+    }
+    function mergeEpisodes(items,known,season,voice) {
+        var out=items.slice(),seen={};items.forEach(function(e){if(!e.loadSeason)seen[e.season+':'+e.number]=true;});
+        (known||[]).forEach(function(m){var n=m.episode_number,s=m.season_number==null?season:m.season_number;if(+n>0 && !seen[s+':'+n])out.push({season:String(s),number:String(n),title:m.name || 'Эпизод '+n,voice:voice,unavailable:true});});
+        return out.sort(function(a,b){return +a.season-+b.season || +a.number-+b.number;});
+    }
+    function availability(date,now) {
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(date||''))return '';
+        var today=new Date(now==null?Date.now():now),parts=date.split('-').map(Number);
+        var days=Math.round((Date.UTC(parts[0],parts[1]-1,parts[2])-Date.UTC(today.getFullYear(),today.getMonth(),today.getDate()))/86400000);
+        return days>0?'Осталось дней: '+days:'';
+    }
+    var Core = { episodeHash:episodeHash,mergeEpisodes:mergeEpisodes,availability:availability,exactResult: exactResult, searchNames: searchNames, maxQuality: maxQuality, keepVisible: keepVisible, progressText: progressText, VERSION: VERSION, form: form, absolute: absolute, hostSetting: hostSetting, rank: rank,
         rezkaDecode: rezkaDecode, kodikDecode: kodikDecode, labelledLinks: labelledLinks, chooseQuality: chooseQuality,
         parseRezkaSearch: parseRezkaSearch, parseRezkaPage: parseRezkaPage, rezkaEpisodes: rezkaEpisodes,
         kodikResults: kodikResults, parseKodikPlayer: parseKodikPlayer, kodikEndpoint: kodikEndpoint, kodikCatalog: kodikCatalog,
@@ -982,7 +1009,8 @@
                 nativeBackground=nativeImage.clone().removeAttr('id').removeClass('dim').addClass('lp-native-background');
                 nativeBackground.css({position:'fixed',left:(rect.left/root.innerWidth*100)+'vw',top:(rect.top/root.innerHeight*100)+'vh',width:(rect.width/root.innerWidth*100)+'vw',height:(rect.height/root.innerHeight*100)+'vh',margin:0,transform:'none',transition:'none',opacity:style.opacity,zIndex:0});
             }
-            var errorMessage = '', resizeTimer = null;
+            var errorMessage = '', resizeTimer = null, migratedProgress = {};
+            var vignette=$('<div class="lp-vignette" aria-hidden="true"><div class="lp-vignette-edge"></div></div>');
             var busy = false, destroyed = false, last = null, generation = 0, reverse = false, pendingResume = null;
             var cache = {}, probeQueue = [], probing = 0, observed = null, metadata = { details: movie, seasons: {}, id: null, request: 0, signature: '' };
             var type = /^(tv|movie)$/.test(movie.media_type) ? movie.media_type : movie.name || movie.first_air_date ? 'tv' : 'movie';
@@ -1082,11 +1110,12 @@
                     if(url) nativeBackground=setImage($('<img class="full-start__background loaded lp-native-background" alt="">'),url).css({position:'fixed',transition:'none',zIndex:0});
                 }
                 if(nativeBackground) {if(!nativeBackground.parent().length) $('body').prepend(nativeBackground);nativeBackground.css('display',sharp?'block':'none');}
+                if(sharp){if(!vignette.parent().length) $('body').prepend(vignette);if(nativeBackground){vignette.insertAfter(nativeBackground);var bgRect=nativeBackground[0].getBoundingClientRect();vignette.find('.lp-vignette-edge').css({left:bgRect.left+'px',width:bgRect.width+'px'});}}else vignette.detach();
                 var bg=Lampa.Utils && Lampa.Utils.cardImgBackground ? Lampa.Utils.cardImgBackground(movie) : imageURL(movie.poster_path || movie.backdrop_path,'w200');
                 if(v!=='card') bg=imageURL(metadata.details.backdrop_path || metadata.details.poster_path,'w200');
                 if (bg && bg!==lastBackground && Lampa.Background && Lampa.Background.change) {Lampa.Background.change(bg);lastBackground=bg;}
             }
-            function releaseBackground() { lastBackground='';$('body').removeClass('lp-active lp-card-background');if(nativeBackground) nativeBackground.detach(); }
+            function releaseBackground() { lastBackground='';$('body').removeClass('lp-active lp-card-background');if(nativeBackground) nativeBackground.detach();vignette.detach(); }
             function fitStrip() {top.css('min-height','');setTimeout(function(){if(destroyed)return;html.find('.lp-control-value').each(function(){$(this).toggleClass('lp-clipped',this.scrollWidth>this.clientWidth+1);});},0);}
             function resized(){clearTimeout(resizeTimer);resizeTimer=setTimeout(function(){if(!destroyed){layout();if(last && html[0].contains(last))focusNode(last);}},100);}
             $(root).on('resize.lamplay',resized);
@@ -1186,7 +1215,9 @@
                 },failed);
             }
             function seasonList() {
-                var values=[];episodes.forEach(function (ep) {var s=String(ep.season||'');if (s && values.indexOf(s)<0) values.push(s);});return values.sort(numSort);
+                var values=[];episodes.forEach(function (ep) {var s=String(ep.season||'');if (s && values.indexOf(s)<0) values.push(s);});
+                if(series())list(metadata.details.seasons).forEach(function(s){if(+s.season_number>0 && +s.episode_count>0 && values.indexOf(String(s.season_number))<0)values.push(String(s.season_number));});
+                return values.sort(numSort);
             }
             function loadEpisodes() {
                 body.empty();begin('Получаем список…',loadEpisodes);
@@ -1213,19 +1244,27 @@
                     finish();renderEpisodes();loadSeasonMetadata(season);resumeWhenReady();
                 },failed,season);
             }
-            function visibleEpisodes() {var items=episodes.filter(function (ep) {return !series() || !season || String(ep.season)===season;});return reverse?items.slice().reverse():items;}
+            function visibleEpisodes() {var items=episodes.filter(function (ep) {return !series() || !season || String(ep.season)===season;});if(series())items=mergeEpisodes(items,metadata.seasons[String(season)],season,voice);return reverse?items.slice().reverse():items;}
             function progress(ep) {
                 var base='wf_online|'+(movie.source||'tmdb')+':'+(movie.id||movie.original_title||movie.title||release.title)+'|'+source.id+'|'+release.id+'|'+ep.season+'|'+ep.number;
-                var hash=Lampa.Utils.hash(base+'|voice='+voiceOf(ep).id);
-                var view=Lampa.Timeline?Lampa.Timeline.view(hash):{hash:hash,time:0,duration:0,percent:0};
+                var hash=episodeHash(movie,ep.season,ep.number,series(),Lampa.Utils.hash);
+                var timelineCard=series()?Object.assign({},movie,{original_name:movie.original_name || movie.original_title || movie.name || movie.title}):movie;
+                var meta=Lampa.Timeline && Lampa.Timeline.link?Lampa.Timeline.link(timelineCard,series()?+ep.season:undefined,series()?+ep.number:undefined):undefined;
+                var view=Lampa.Timeline?Lampa.Timeline.view(hash,meta):{hash:hash,time:0,duration:0,percent:0};
                 var resume = savedResume();
-                if (!view.time && resume && resume.hash===hash) ['time','duration','percent'].forEach(function (k) {view[k]=+resume[k]||0;});
-                if (!view.time && !view.percent && Lampa.Timeline && String(voiceOf(ep).id)===String(release.voices[0].id)) {
-                    var previous=Lampa.Timeline.view(Lampa.Utils.hash(base));
-                    ['time','duration','percent'].forEach(function (k) {if (previous[k]) view[k]=previous[k];});
+                if (!view.time && !view.percent && Lampa.Timeline && !migratedProgress[hash]) {
+                    var candidates=[Lampa.Timeline.view(Lampa.Utils.hash(base))];
+                    list(release.voices).forEach(function(v){candidates.push(Lampa.Timeline.view(Lampa.Utils.hash(base+'|voice='+v.id)));});
+                    if(resume && String(resume.season)===String(ep.season) && String(resume.number)===String(ep.number))candidates.push(resume);
+                    candidates.sort(function(a,b){return (+b.updated||0)-(+a.updated||0) || (+b.time||0)-(+a.time||0);});
+                    var previous=candidates.filter(function(p){return +p.time>0 || +p.percent>0;})[0];
+                    if(previous){['time','duration','percent'].forEach(function(k){view[k]=+previous[k]||0;});if(view.handler)view.handler(view.percent,view.time,view.duration);}
                 }
+                migratedProgress[hash]=true;
                 return view;
             }
+            function started(ep){return !!object(setting('started',{}))[episodeHash(movie,ep.season,ep.number,series(),Lampa.Utils.hash)];}
+            function markStarted(ep){if(ep.unavailable)return;var items=object(setting('started',{})),hash=episodeHash(movie,ep.season,ep.number,series(),Lampa.Utils.hash);items[hash]=Date.now();var keys=Object.keys(items).sort(function(a,b){return items[b]-items[a];});keys.slice(2000).forEach(function(k){delete items[k];});save('started',items);}
             function snapshot(ep,view) {
                 var r=resultSelected, storedResult={};
                 ['id','title','original','url','year','widget','translation'].forEach(function (k) {if (r[k]!==undefined) storedResult[k]=r[k];});
@@ -1247,7 +1286,7 @@
                 content.append(title);
                 var row=$('<div class="lp-resume-row"></div>'), info=$('<div class="lp-resume-info"></div>');
                 if (resume || episodes.length) {
-                    var ep=episodes.filter(function(e){return !e.loadSeason;})[0];
+                    var ep=episodes.filter(function(e){return !e.loadSeason && !e.unavailable;})[0];
                     var label=(resume?'Продолжить':'Смотреть')+((resume?resume.series:series())?' · S'+(resume?resume.season:ep.season)+' E'+(resume?resume.number:ep.number):'');
                     row.append(interactive($('<div class="lp-continue"></div>').append(PLAY,$('<span></span>').text(label)),resume?resumePlay:function(){play(ep);}));
                     if (resume) {
@@ -1283,7 +1322,7 @@
                     var v=voiceOf(ep), m=series()?detailFor(ep):metadata.details, p=progress(ep);
                     var node=interactive($('<div class="lamplay__item lp-episode"></div>'),function () {play(ep);});
                     node[0]._lpEpisodeKey=streamKey(ep);
-                    var picture=$('<div class="lp-picture"></div>');node.toggleClass('lp-started',+p.time>0 || +p.percent>0);picture.append($('<span class="lp-focus-play"></span>').append(PLAY));
+                    var picture=$('<div class="lp-picture"></div>');node.toggleClass('lp-started',!ep.unavailable && (started(ep) || +p.time>0 || +p.percent>0));picture.append($('<span class="lp-focus-play"></span>').append(PLAY));
                     var img=series()?thumbnail(ep):'';
                     if (img) picture.append(setImage($('<img alt="" loading="lazy">'),img));
                     if (series()) picture.append($('<span class="lp-episode-number"></span>').text('S'+ep.season+':E'+ep.number));
@@ -1308,6 +1347,15 @@
                     var desc=series()?(m.overview || ep.description):m.tagline;
                     if (series() || desc) info.append($('<div class="lp-description"></div>').text(desc || ''));
                     node.append(picture,info);body.append(node);
+                    if(ep.unavailable){
+                        var notice=availability(m.air_date) || 'Недоступна в данной озвучке';
+                        node.addClass('lp-unavailable').attr({'aria-disabled':'true','data-lp-availability':notice});
+                        picture.find('.lp-episode-number,.lp-focus-play,.lp-runtime,.lp-percent,.lp-progress,.lp-quality').remove();
+                        picture.append($('<span class="lp-unavailable-number"></span>').text(('0'+ep.number).slice(-Math.max(2,String(ep.number).length))));
+                        info.find('.lp-watched,.lp-progress,.lp-quality-meta').remove();info.find('.lamplay__item-title').text(m.name || 'Эпизод '+ep.number);
+                        info.append($('<div class="lp-availability"></div>').text(notice));
+                        return;
+                    }
                     var task={ep:ep,node:node,badge:badge,qualityMeta:qualityMeta,ticket:ticket,source:source.id,key:streamKey(ep),release:release};node[0]._lpProbe=task;
                     var hit=cache[task.key];if (hit && Date.now()-hit.time<60000) showQuality(task,hit.streams);
                 });
@@ -1354,7 +1402,7 @@
             function resolveCell(item,done,fail) {
                 var ep=item._lpEpisode, hit=cache[streamKey(ep)];
                 function ready(streams) {
-                    try {streams=prepareStreams(streams,setting);item.url=chooseQuality(streams.quality,setting('quality','1080'));item.quality=streams.quality;item.subtitles=streams.subtitles && streams.subtitles.length?streams.subtitles:false;if (!item.url) throw new Error('Нет доступного видеопотока.');var previous=Lampa.Storage.field?Lampa.Storage.field('video_quality_default'):Lampa.Storage.get('video_quality_default',1080),chosen=Object.keys(item.quality).filter(function(k){return item.quality[k]===item.url;})[0];
+                    try {streams=prepareStreams(streams,setting);item.url=chooseQuality(streams.quality,setting('quality','1080'));item.quality=streams.quality;item.subtitles=streams.subtitles && streams.subtitles.length?streams.subtitles:false;if (!item.url) throw new Error('Нет доступного видеопотока.');markStarted(ep);var previous=Lampa.Storage.field?Lampa.Storage.field('video_quality_default'):Lampa.Storage.get('video_quality_default',1080),chosen=Object.keys(item.quality).filter(function(k){return item.quality[k]===item.url;})[0];
                     try{Lampa.Storage.set('video_quality_default',qualityNumber(chosen));done();}finally{Lampa.Storage.set('video_quality_default',previous);}}
                     catch(e) {fail(e);}
                 }
@@ -1362,14 +1410,15 @@
             }
             function play(ep,resuming) {
                 if (busy) return;
+                if(ep.unavailable){Lampa.Noty.show(availability(detailFor(ep).air_date) || 'Серия недоступна в данной озвучке');return;}
                 begin('Получаем видеопоток…',function () {play(ep,resuming);});
-                var items=episodes.filter(function (e) {return !e.loadSeason && (!series() || !season || String(e.season)===season);}).slice();
+                var items=episodes.filter(function (e) {return !e.loadSeason && !e.unavailable && (!series() || !season || String(e.season)===season);}).slice();
                 if (series()) items.sort(function (a,b) {return +a.season-+b.season || +a.number-+b.number;});
                 var playlist=items.map(cell), index=items.indexOf(ep), first=playlist[index];
                 if (!first) return failed(new Error('Серия не найдена.'));
                 playlist.forEach(function (item) {item.url=function (callback) {resolveCell(item,callback,function (e) {item.url='';Lampa.Noty.show(safeError(e));callback();});};});
                 resolveCell(first,function () {
-                    saveSource(movie,source.id);record(first._lamplay);finish();renderHero();
+                    markStarted(ep);saveSource(movie,source.id);record(first._lamplay);finish();renderHero();
                     if (movie.id && Lampa.Favorite) Lampa.Favorite.add('history',movie,100);
                     if (resuming && first.timeline.time>0) { first._lpResumeAt=first.timeline.time;first.timeline.percent=0; }
                     Lampa.Player.play(first);Lampa.Player.playlist(playlist);
@@ -1399,7 +1448,7 @@
                     metadataRequest(sourceType+'/'+id+'?language=ru&append_to_response=images&include_image_language=ru,en,null',function (d) {
                         if (destroyed || ticket!==metadata.request) return;metadata.details=d;
                         var logos=list(d.images && d.images.logos);var logo=logos.filter(function (l) {return l.iso_639_1==='ru';})[0] || logos.filter(function (l) {return l.iso_639_1==='en';})[0] || logos[0];
-                        metadata.logo=logo && imageURL(logo.file_path,'w500');renderHero();layout();
+                        metadata.logo=logo && imageURL(logo.file_path,'w500');renderHero();refreshControls();
                         if (release && !busy && !errorMessage) {renderEpisodes(last && last._lpEpisodeKey);if (series()) loadSeasonMetadata(season);}
                     });
                 }
@@ -1453,9 +1502,27 @@
             }
             function move(dir,fallback) {
                 var current=html.find('.selector.focus').first();if(!current.length && last) current=$(last);
-                if(current.hasClass('lp-retry') && (dir==='down'||dir==='right')){var retryNext=filters.find('.selector').first();if(!retryNext.length)retryNext=tools.find('.selector').first();Lampa.Controller.collectionFocus(retryNext,html);return;}
-                if(dir==='up' && status.find('.lp-retry').length && !root.Navigator.canmove('up')){Lampa.Controller.collectionFocus(status.find('.lp-retry'),html);return;}
                 var filter=current.attr('data-lp-control'), parent=current.parent(), first=parent.children('.selector').first()[0]===current[0];
+                function nearest(candidates,axis){var r=current[0].getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2,best=null,score=Infinity;
+                    candidates.each(function(){if(this===current[0])return;var t=this.getBoundingClientRect();if(!t.width || !t.height)return;var dx=t.left+t.width/2-cx,dy=t.top+t.height/2-cy;if(axis==='up' && dy>=-4 || axis==='down' && dy<=4 || axis==='left' && dx>=-4 || axis==='right' && dx<=4)return;var val=(axis==='up'||axis==='down')?Math.abs(dy)+Math.abs(dx)*.35:Math.abs(dx)+Math.abs(dy)*.35;if(val<score){score=val;best=this;}});return best;}
+                function focus(target){if(target){Lampa.Controller.collectionFocus(target,html);return true;}return false;}
+                var retry=status.find('.lp-retry');
+                if(current.hasClass('lp-retry')){
+                    if(dir==='up' || dir==='left'){if(!focus(nearest(html.find('.selector').not('.lp-retry'),dir)))Lampa.Controller.toggle('head');}
+                    return;
+                }
+                if(filter && parent[0]===tools[0] && dir==='down' && view()!=='vertical'){
+                    var candidates=retry.length?retry:body.find('.lp-episode');if(focus(nearest(candidates,'down')))return;
+                }
+                if(filter && view()==='vertical' && dir==='right' && (retry.length || body.find('.lp-episode').length)){
+                    if(focus(nearest(retry.length?retry:body.find('.lp-episode'),'right')))return;
+                }
+                if((filter || current.hasClass('lp-continue')) && dir==='up'){
+                    if(!focus(nearest(html.find('.selector').not('.lp-retry,.lp-episode'),'up')))Lampa.Controller.toggle('head');return;
+                }
+                if(errorMessage && filter && dir==='down'){
+                    if(!focus(nearest(tools.find('.selector'),'down')))focus(nearest(retry,'down'));return;
+                }
                 if(dir==='right' && (current.hasClass('lp-episode') && (view()==='vertical' || current[0]===body.children('.lp-episode').last()[0]) || filter && parent.children('.selector').last()[0]===current[0] && (parent.hasClass('lp-strip') || parent[0]===tools[0] && view()!=='vertical'))) return filterDrawer();
                 var resume=hero.find('.lp-continue');
                 if(dir==='left' && filter && first && resume.length) {returnFilter=filter;Lampa.Controller.collectionFocus(resume,html);return;}
@@ -1466,7 +1533,7 @@
             this.pause=function () {releaseBackground();};this.stop=function () {releaseBackground();};
             var resizeHandler=function(){if(inActivity()) syncBackground(resultsVisible?'results':view());fitStrip();};root.addEventListener('resize',resizeHandler);
             this.playerClosed=function () {if (release && !busy && !errorMessage) renderEpisodes(lastEpisodeKey);else renderHero();};
-            this.destroy=function () {$(root).off('resize.lamplay',resized);clearTimeout(resizeTimer);releaseBackground();if(nativeBackground) nativeBackground.remove();root.removeEventListener('resize',resizeHandler);destroyed=true;if (activeScreen===self) activeScreen=null;changeGeneration();metadataIo.clear();html.remove();};
+            this.destroy=function () {$(root).off('resize.lamplay',resized);clearTimeout(resizeTimer);html.find('.lp-scroll').each(function(){if(this._lpScrollFrame)root.cancelAnimationFrame(this._lpScrollFrame);});releaseBackground();vignette.remove();if(nativeBackground) nativeBackground.remove();root.removeEventListener('resize',resizeHandler);destroyed=true;if (activeScreen===self) activeScreen=null;changeGeneration();metadataIo.clear();html.remove();};
         }
 
         $('<style id="lamplay-style"></style>').text([
@@ -2356,6 +2423,30 @@
         },'',function(item){menuIcon(item,'about');});
         $('<style></style>').text('.lamplay[data-view=card] .lamplay__control{min-height:2.3em;padding:.45em .7em}.lamplay[data-view=card] .lp-strip{padding-top:.1em;padding-bottom:.1em}.lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{display:flex;align-items:flex-end;padding-bottom:.6em}.lp-series[data-view=horizontal] .lp-episode-info,.lp-series[data-view=card] .lp-episode-info{height:7.8em;flex:none;box-sizing:border-box}@media(max-height:650px){.lp-series[data-view=horizontal] .lp-episode-info,.lp-series[data-view=card] .lp-episode-info{height:7em}}.full-start-new__body.lp-poster-stable{align-items:flex-start!important}.lp-series[data-view=horizontal] .lp-description,.lp-series[data-view=card] .lp-description{height:3.9em}.lp-series[data-view=horizontal] .lp-episode-meta,.lp-series[data-view=card] .lp-episode-meta{min-height:1.3em}.lp-series[data-view=horizontal] .lamplay__item-title,.lp-series[data-view=card] .lamplay__item-title{height:2.4em}.lp-picture{background:rgba(255,255,255,.08)}.lp-auth-dot{display:inline-block;width:.55em;height:.55em;margin-left:.6em;border-radius:50%;background:#ef5350;vertical-align:middle}.lp-auth-dot.lp-auth-confirmed{background:#4caf50}.lamplay__status.lp-error{pointer-events:auto}.lp-retry{display:inline-flex;align-items:center;min-height:2.5em;padding:.35em .7em;margin-left:.5em;border:1px solid currentColor;border-radius:.3em}.lp-drawer{position:absolute;right:0;top:0;bottom:0;width:28em;max-width:42vw;background:rgba(27,29,38,.98);z-index:25;padding:1em;overflow:auto}.lp-drawer-title{font-size:1.4em;margin-bottom:1em}.lp-drawer-item{padding:1em;min-height:3em;display:flex;align-items:center;border-radius:.25em}.lp-drawer-item.focus{background:#fff;color:#111}.lp-original-title{min-height:1.25em}.lp-original-title:empty{opacity:.25}').appendTo('head');
         $('<style></style>').text("/* Shared geometry and readable filter values. */\n.lamplay__control{gap:.35em;overflow:hidden;min-width:0}\n.lp-control-label{flex:none}.lp-control-value{opacity:.72;min-width:0;overflow:hidden;white-space:nowrap;display:block;mask-image:linear-gradient(to right,#000 calc(100% - .8em),transparent);-webkit-mask-image:linear-gradient(to right,#000 calc(100% - .8em),transparent)}\n.lamplay__control.focus .lp-control-value{opacity:.65}.lp-search svg{flex:none}\n.lamplay[data-view=vertical] .lp-side,.lamplay[data-view=results] .lp-side{width:34%;overflow-y:auto;padding:.25em}\n.lamplay[data-view=vertical] .lp-hero,.lamplay[data-view=results] .lp-hero,.lp-series[data-view=horizontal] .lp-top>.lp-hero{width:100%;height:auto;min-height:0;max-height:none;aspect-ratio:16/9;flex:none}\n.lp-series[data-view=horizontal] .lp-top>.lp-hero{width:34%;align-self:flex-start}\n.lp-series[data-view=horizontal] .lp-top{height:auto;min-height:0}\n.lamplay[data-view=vertical] .lp-resume-row,.lamplay[data-view=results] .lp-resume-row,.lp-series[data-view=horizontal] .lp-resume-row{flex-direction:row;align-items:center;gap:.6em;font-size:.9em}\n.lp-resume-row .lp-continue{font-size:.9em;flex-shrink:0;max-width:100%}.lp-resume-info{overflow:hidden}.lp-resume-title{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}\n.lp-hero-content{padding:.8em}.lp-title-slot{flex-shrink:1;min-height:0}.lp-title-logo{max-height:100%}\n.lamplay[data-view=vertical] .lp-title-slot,.lamplay[data-view=results] .lp-title-slot,.lp-series[data-view=horizontal] .lp-title-slot{height:2.5em;width:65%}\n.lp-series[data-view=horizontal] .lp-filters{justify-content:space-between;gap:.65em}\n.lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{padding:1em .65em .6em}\n.lp-picture{transition:transform .16s ease;transform-origin:center bottom}\n.lp-series[data-view=horizontal] .lp-episode.focus .lp-picture,.lp-series[data-view=card] .lp-episode.focus .lp-picture{transform:scale(1.045)}\n.lp-series[data-view=vertical] .lp-episode{transition:transform .16s ease;transform-origin:center;position:relative;border-color:transparent;outline:none}\n.lp-series[data-view=vertical] .lp-episode.lp-started{box-shadow:0 0 0 1px rgba(255,255,255,.48)}\n.lp-series[data-view=vertical] .lp-episode.focus,.lp-series[data-view=vertical] .lp-episode:focus{background:rgba(0,0,0,.35);color:#fff;border-color:transparent;box-shadow:0 0 0 .16em #fff;transform:scale(1.015);z-index:1}\n.lp-series[data-view=vertical] .lp-episode.focus .lamplay__item-detail{color:rgba(255,255,255,.8)}\n.lp-series[data-view=vertical] .lp-body-pane{padding:.65em}\nbody.lp-card-background .lp-native-background{filter:brightness(.86)!important;mask-image:radial-gradient(ellipse at 56% 42%,#000 30%,rgba(0,0,0,.78) 65%,rgba(0,0,0,.15) 100%)!important;-webkit-mask-image:radial-gradient(ellipse at 56% 42%,#000 30%,rgba(0,0,0,.78) 65%,rgba(0,0,0,.15) 100%)!important}\n.lamplay__status.lp-error{position:static;transform:none;max-width:100%;width:100%;align-self:stretch;box-sizing:border-box;margin:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1em;padding:1.5em;text-align:center;box-shadow:none;background:rgba(35,23,27,.85);min-height:9em}\n.lamplay__status.lp-error>span:first-child{max-width:38em;line-height:1.45;overflow-wrap:anywhere}\n.lp-error .lp-retry{margin:0;padding:.65em 1.1em;text-decoration:none;border:2px solid rgba(255,255,255,.65);border-radius:.4em;line-height:1.25;justify-content:center;color:#fff;background:transparent}\n.lamplay .lp-error .lp-retry.focus,.lamplay .lp-error .lp-retry:focus{background:#fff;color:#111;border-color:#fff}\n/* Narrow or shallow windows use document flow, with room for Lampa navigation. */\n@media(max-width:900px),(max-height:500px){\n.lamplay{overflow-y:auto;height:100%;font-size:1em;padding-bottom:6em;box-sizing:border-box}\n.lp-panel{height:auto;min-height:100%;padding:.65em;overflow:visible}\n.lp-main,.lp-side{overflow:visible!important}.lp-body-pane{overflow:visible;flex:none;min-height:0}\n.lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{align-items:flex-start;overflow-x:auto;overflow-y:hidden;flex:none;padding:1em .6em}\n.lp-series[data-view=horizontal] .lp-episode,.lp-series[data-view=card] .lp-episode{width:38vw;min-width:11em;max-width:20em}\n.lp-series[data-view=horizontal] .lp-picture,.lp-series[data-view=card] .lp-picture{height:auto;aspect-ratio:16/9}\n.lp-series[data-view=horizontal] .lp-filters{justify-content:flex-start;gap:.7em}\n.lamplay[data-view=card] .lp-resume-row{flex-wrap:wrap}.lamplay[data-view=card] .lp-top{gap:.7em}\n.lamplay[data-view=vertical] .lp-resume-row,.lamplay[data-view=results] .lp-resume-row,.lp-series[data-view=horizontal] .lp-resume-row{flex-wrap:wrap}\n.lamplay[data-view=vertical] .lp-side,.lamplay[data-view=results] .lp-side{width:34%}\n.lp-hero-content{padding:.5em}.lp-hero .lp-continue{font-size:.8em;min-height:2.4em;padding:.35em .5em}\n}\n@media(max-width:600px){\n.lp-panel,.lp-top{flex-direction:column!important;height:auto!important}\n.lamplay[data-view=vertical] .lp-side,.lamplay[data-view=results] .lp-side,.lp-series[data-view=horizontal] .lp-top>.lp-hero{width:100%}\n.lp-hero{aspect-ratio:16/9;min-height:0!important}.lp-main{flex:none;width:100%}\n.lamplay[data-view=vertical] .lp-tools,.lamplay[data-view=results] .lp-tools{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible}\n.lamplay[data-view=vertical] .lp-tools>.lamplay__control{height:2.8em;font-size:1em}\n.lp-series[data-view=vertical] .lp-picture{width:30%;min-width:0;height:auto;aspect-ratio:16/9;align-self:center}\n.lp-series[data-view=vertical] .lp-episode-info{font-size:.85em;padding:.35em;position:relative}\n.lp-series[data-view=vertical] .lp-row-duration{position:static;float:right;margin-left:.5em}\n.lp-series[data-view=horizontal] .lp-episode,.lp-series[data-view=card] .lp-episode{width:68vw;min-width:0}\n.lp-series[data-view=horizontal] .lp-resume-row,.lamplay[data-view=vertical] .lp-resume-row,.lamplay[data-view=results] .lp-resume-row{flex-wrap:nowrap;font-size:1em}\n.lp-series[data-view=horizontal] .lp-hero .lp-continue,.lamplay[data-view=vertical] .lp-hero .lp-continue{font-size:.9em}\n.lamplay[data-view=card] .lp-title-slot{height:auto;min-height:2.8em}.lamplay[data-view=card] .lp-title-logo{max-height:3em}\n}\n.lp-control-value{mask-image:none;-webkit-mask-image:none}.lp-control-value.lp-clipped{mask-image:linear-gradient(to right,#000 calc(100% - .8em),transparent);-webkit-mask-image:linear-gradient(to right,#000 calc(100% - .8em),transparent)}\n.lamplay[data-view=vertical] .lp-side,.lamplay[data-view=results] .lp-side{padding:0}\n").appendTo('head');
+        $('<style id="lamplay-090-style"></style>').text([
+            '.lp-vignette{position:fixed;inset:0;z-index:0;pointer-events:none;background:linear-gradient(90deg,rgba(0,0,0,.82),rgba(0,0,0,.22) 35%,transparent 65%),linear-gradient(0deg,rgba(0,0,0,.85),rgba(0,0,0,.12) 60%),radial-gradient(ellipse at 57% 40%,transparent 28%,rgba(0,0,0,.46) 100%)}',
+            '.lp-vignette-edge{position:absolute;top:0;bottom:0;background:linear-gradient(90deg,#000,rgba(0,0,0,.35) 18%,transparent 42%)}',
+            'body.lp-card-background .lp-native-background{filter:brightness(.9)!important;mask-image:none!important;-webkit-mask-image:none!important}',
+            '.lamplay[data-view=horizontal] .lp-hero-content,.lamplay[data-view=vertical] .lp-hero-content{padding:.65em!important;gap:.4em;justify-content:flex-end}',
+            '.lamplay[data-view=horizontal] .lp-title-slot,.lamplay[data-view=vertical] .lp-title-slot{height:2.5em;width:65%;max-width:14em;align-self:flex-start;justify-content:flex-start}',
+            '.lamplay[data-view=horizontal] .lp-title-logo,.lamplay[data-view=vertical] .lp-title-logo{width:auto;height:100%;max-height:100%;max-width:100%;object-fit:contain;object-position:left center;align-self:flex-start}',
+            '.lamplay[data-view=horizontal] .lp-resume-row,.lamplay[data-view=vertical] .lp-resume-row{flex-direction:row;align-items:center;font-size:.9em;gap:.6em}',
+            '.lamplay[data-view=horizontal] .lp-resume-info,.lamplay[data-view=vertical] .lp-resume-info{font-size:.9em;line-height:1.25;flex:1}',
+            '.lamplay[data-view=horizontal] .lp-resume-detail,.lamplay[data-view=vertical] .lp-resume-detail{font-size:.86em}',
+            '.lamplay[data-view=horizontal] .lp-continue,.lamplay[data-view=vertical] .lp-continue{font-size:.9em}',
+            '.lamplay__status.lp-error{background:transparent!important;border:0!important;border-radius:0;box-shadow:none!important}',
+            '.lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{padding:1.35em .85em .65em;scroll-behavior:auto}',
+            '.lp-series[data-view=horizontal] .lp-episode,.lp-series[data-view=card] .lp-episode{padding-top:.6em;overflow:visible}',
+            '.lp-series[data-view=horizontal] .lp-episode.lp-started .lp-picture,.lp-series[data-view=card] .lp-episode.lp-started .lp-picture{outline:2px solid rgba(255,255,255,.65);outline-offset:2px}',
+            '.lp-series[data-view=vertical] .lp-episode.lp-started{box-shadow:0 0 0 2px rgba(255,255,255,.65)}',
+            '.lp-series[data-view=horizontal] .lp-episode.focus .lp-picture,.lp-series[data-view=card] .lp-episode.focus .lp-picture{outline:.17em solid white;outline-offset:.17em}',
+            '.lp-series[data-view=vertical] .lp-episode.focus{box-shadow:0 0 0 .16em white}',
+            '.lp-unavailable .lp-picture{background:rgba(255,255,255,.025)}.lp-unavailable .lp-picture img{opacity:.28}.lp-unavailable .lp-episode-info{color:rgba(255,255,255,.58)}',
+            '.lp-unavailable-number{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.7em;font-weight:400;color:rgba(255,255,255,.48);z-index:1}',
+            '.lp-availability{font-size:.78em;line-height:1.35;margin-top:.4em}.lp-unavailable .lp-episode-meta{color:rgba(255,255,255,.5)}',
+            '@media(max-width:900px),(max-height:500px){.lamplay[data-view=horizontal] .lp-hero-content,.lamplay[data-view=vertical] .lp-hero-content{padding:.5em!important}.lamplay[data-view=horizontal] .lp-resume-row,.lamplay[data-view=vertical] .lp-resume-row{flex-wrap:wrap}}',
+            '@media(max-width:600px){.lamplay[data-view=horizontal] .lp-resume-row,.lamplay[data-view=vertical] .lp-resume-row{font-size:1em;flex-wrap:nowrap}}'
+        ].join('\n')).appendTo('head');
         var settingsObserver = null;
         function arrangeSettings(body) {
             childMenus.forEach(function (id) {

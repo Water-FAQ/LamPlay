@@ -1,7 +1,7 @@
 (function(root){
     const $=root.jQuery;
     const values={lamplay_source:'rezka'}, components={}, listeners={},settingsListeners={},params={},calls=[],notices=[],played=[],timeline={},controllers={};
-    let active=null,selection=null,input=null,film=false,loggedIn=false,confirm=true,hold=false,pending=[],many=false,ambiguous=false,aliasMovie=false,missingLogo=false;
+    let active=null,selection=null,input=null,film=false,loggedIn=false,confirm=true,hold=false,pending=[],many=false,ambiguous=false,aliasMovie=false,missingLogo=false,upcoming=false;
     const events=()=>{const subs={};return {follow:(n,f)=>(subs[n]||=[]).push(f),send:(n,e)=>(subs[n]||[]).forEach(f=>f(e))};};
     const playerEvents=events(),videoEvents=events(),playlistEvents=events();let playlist=[],playdata=null;
     const releases=()=>`<div class="b-content__inline_item-link"><a href="/${film?'films':'series'}/1.html">${film?(aliasMovie?'Тестовый фильм / Другое название':'Тестовый фильм'):'Братья'}</a><div>2026, США</div></div>`+(ambiguous?'<div class="b-content__inline_item-link"><a href="/series/2.html">Братья</a><div>2026, США</div></div>':'');
@@ -22,7 +22,7 @@
         }
         else if(url.includes('api.tmdb.test/')){
             if(url.includes('/images?'))value={logos:missingLogo?[]:[{iso_639_1:'ru',file_path:'/logo.png'}]};
-            else if(url.includes('/season/')){const s=Number(url.match(/season\/(\d+)/)[1]);value={episodes:Array.from({length:many?176:7},(_,i)=>({season_number:s,episode_number:i+1,name:['В дороге','Охота','Малыш Вуди','Группа'][i]||'Эпизод '+(i+1),still_path:'/ep'+(i+1)+'.jpg',runtime:32,air_date:'2026-09-22',vote_average:8.2,overview:'Краткое описание событий серии. Герои отправляются в дорогу и встречают новых знакомых.'}))};}
+            else if(url.includes('/season/')){const s=Number(url.match(/season\/(\d+)/)[1]);value={episodes:Array.from({length:many?176:upcoming?10:7},(_,i)=>({season_number:s,episode_number:i+1,name:['В дороге','Охота','Малыш Вуди','Группа'][i]||'Эпизод '+(i+1),still_path:upcoming&&i>7?null:'/ep'+(i+1)+'.jpg',runtime:upcoming&&i>6?null:32,air_date:upcoming&&i>7?'2099-12-15':'2026-09-22',vote_average:upcoming&&i>6?0:8.2,overview:'Краткое описание событий серии. Герои отправляются в дорогу и встречают новых знакомых.'}))};}
             else value={id:99,name:film?undefined:'Братья',title:film?'Тестовый фильм':undefined,backdrop_path:'/background.jpg',poster_path:'/poster.jpg',runtime:113,release_date:'2026-09-22',tagline:'Иногда, чтобы изменить жизнь, достаточно встречи.',images:{logos:[{iso_639_1:'ru',file_path:'/logo.png'}]}};
         }
         else if(url.includes('/series/')||url.includes('/films/'))value=page();
@@ -58,6 +58,6 @@
         settingsEvent:(name,body,params)=>{(settingsListeners.open||[]).forEach(f=>f({name,body,params}));},
         progress:(time,duration)=>{videoEvents.send('timeupdate',{current:time,duration});},
         failLogin:()=>confirm=false,many:()=>many=true,ambiguous:()=>ambiguous=true,
-        aliasMovie:()=>aliasMovie=true,noLogo:()=>missingLogo=true,activateFull:render=>active={activity:{render:()=>render}},hold:()=>{hold=true;return pending;},release:()=>{hold=false;},screen:null
+        upcoming:()=>upcoming=true,aliasMovie:()=>aliasMovie=true,noLogo:()=>missingLogo=true,activateFull:render=>active={activity:{render:()=>render}},hold:()=>{hold=true;return pending;},release:()=>{hold=false;},screen:null
     };
 })(window);

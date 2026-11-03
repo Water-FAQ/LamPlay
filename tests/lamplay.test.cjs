@@ -202,7 +202,7 @@ async function interfaceTests(){
     });
     h.m.click('Студия 2');await settle();
     test('Movie playlist contains voices instead of episodes; no fake episode thumbnail',()=>{const p=h.m.played.at(-1);assert.equal(p.title,'Студия 2');assert.equal(p.thumbnail,undefined);assert.equal(h.m.playlist.length,9);});
-    test('Each voice keeps its own timeline key',()=>assert.equal(new Set(h.m.playlist.map(p=>p.timeline.hash)).size,9));
+    test('Movie voices share the standard Lampa timeline key',()=>assert.equal(new Set(h.m.playlist.map(p=>p.timeline.hash)).size,1));
     h.m.parameter('rezka_password').onChange();h.m.input('synthetic-visible-password');h.m.set('rezka_login','tester');h.m.parameter('rezka_signin').onChange();await settle();
     test('Password survives sign-in and mirror changes and is sent verbatim',()=>{
         assert.equal(h.m.values.lamplay_rezka_password,'synthetic-visible-password');assert.equal(h.m.inputOptions.password,false);
