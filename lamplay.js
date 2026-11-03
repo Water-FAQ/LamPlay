@@ -1,10 +1,10 @@
-/* LamPlay by WaterFAQ — 0.5.0 (experimental)
+/* LamPlay by WaterFAQ - 0.6.0 (experimental)
  * Independent Lampa plugin. Direct connections only; no proxy or remote code execution.
  * Providers: HDrezka, Kodik, AniLiberty, Filmix, KinoTochka, AniMedia.
  */
 (function (root) {
     'use strict';
-    var VERSION = '0.5.0';
+    var VERSION = '0.6.0';
     var KEY = 'lamplay';
     var NAME = 'LamPlay';
     var PLAY = '<svg class="lp-play" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 3v18l15-9z"/></svg>';
@@ -132,7 +132,7 @@
         var result = {}, key = movieKey(movie);
         Object.keys(object(history)).forEach(function (id) {
             var value = history[id];
-            if (value && /^(kodik|rezka|libria)$/.test(value.source)) result[id] = { source: value.source, time: +value.time || 0 };
+            if (value && /^(kodik|rezka|libria|filmix|kinotochka|animedia)$/.test(value.source)) result[id] = { source: value.source, time: +value.time || 0 };
         });
         result[key] = { source: source, time: timestamp || Date.now() };
         Object.keys(result).sort(function (a, b) { return result[b].time - result[a].time; }).slice(500)
@@ -298,7 +298,7 @@
         this.request = function (url, data, type, done, fail, extra) {
             if (!absolute(url)) return fail(new Error('Некорректный адрес источника.'));
             if (root.location && root.location.protocol === 'https:' && /^http:/.test(url)) {
-                return fail(new Error('Lampa открыта по HTTPS, а источник — по HTTP. Укажите HTTPS-адрес источника.'));
+                return fail(new Error('Lampa открыта по HTTPS, а источник - по HTTP. Укажите HTTPS-адрес источника.'));
             }
             var request = new Lampa.Reguest();
             var ticket = generation, finished = false;
@@ -363,7 +363,7 @@
             seen[url] = true;
             var info = text(card.querySelector('div')) || text(link);
             var year = info.match(/\b(?:19|20)\d{2}\b/);
-            items.push({ id: url, url: url, title: text(card.querySelector('.enty')) || text(link), year: year ? year[0] : '', description: info });
+            items.push({ id: url, url: url, title: text(card.querySelector('.enty')) || text(link), year: year ? year[0] : '', description: info, series: /\/series\//.test(url)?true:/\/films\//.test(url)?false:undefined });
         });
         return items;
     }
@@ -467,7 +467,7 @@
                 row.imdb_id ? 'imdb:' + row.imdb_id : 'title:' + row.title + ':' + row.year;
             if (!groups[key]) {
                 groups[key] = { id: key, title: row.title || row.title_orig || 'Без названия', original: row.title_orig,
-                    year: row.year, rows: [], description: row.type || '' };
+                    year: row.year, rows: [], series: /serial/.test(row.type || ''), description: row.type || '' };
                 output.push(groups[key]);
             }
             groups[key].rows.push(row);
@@ -670,7 +670,7 @@
             io.request(base() + 'app/search/releases?query=' + encodeURIComponent(query), null, 'json', function (rows) {
                 if (!Array.isArray(rows)) return fail(new Error('AniLiberty: неожиданный формат поиска.'));
                 done(rank(rows.map(function (row) { return { id: row.id, title: row.name && row.name.main || row.alias,
-                    original: row.name && row.name.english, year: row.year, description: 'Серий: ' + (row.episodes_total || '—') }; }), movie));
+                    original: row.name && row.name.english, year: row.year, series:true, description: 'Серий: ' + (row.episodes_total || '—') }; }), movie));
             }, fail);
         };
         this.open = function (result, done, fail) {
@@ -721,18 +721,25 @@
     }
     function Filmix(io,settings) {
         this.id='filmix';this.title='Filmix';
-        var dev=Array(17).join('0').replace(/0/g,function(){return Math.floor(Math.random()*16).toString(16);});
+        var dev=settings('filmix_device_id','') || Array(17).join('0').replace(/0/g,function(){return Math.floor(Math.random()*16).toString(16);}),maxHeight=480;
+        function token(){return String(settings('filmix_token','') || 'aaaabbbbccccddddeeeeffffaaaabbbb').trim();}
         function api(path,params,done,fail) {
-            var host=hostSetting(settings('filmix_host',''),'http://filmixapp.cyou');
-            var query={user_dev_id:dev,user_dev_name:'Xiaomi',user_dev_token:'aaaabbbbccccddddeeeeffffaaaabbbb',user_dev_vendor:'Xiaomi',user_dev_os:'14',user_dev_apk:'2.2.0',app_lang:'ru-rRU'};
+            var host=hostSetting(settings('filmix_host',''),'http://filmixapp.cyou').replace(/\/api\/v2$/i,'');
+            var query={user_dev_id:dev,user_dev_name:'Xiaomi',user_dev_token:token(),user_dev_vendor:'Xiaomi',user_dev_os:'14',user_dev_apk:'2.2.0',app_lang:'ru-rRU'};
             Object.keys(params||{}).forEach(function(k){query[k]=params[k];});
-            io.request(host+'/api/v2/'+path+'?'+form(query),null,'json',done,fail,{headers:{'User-Agent':'okhttp/3.10.0'}});
+            io.request(host+'/api/v2/'+path+'?'+form(query),null,'json',done,function(e){fail(new Error('Filmix ('+path+'): '+safeError(e)));},{headers:{'User-Agent':'okhttp/3.10.0'}});
         }
         this.search=function(query,movie,done,fail){api('search',{story:query},function(rows){
             if(!Array.isArray(rows)) return fail(new Error('Filmix: поиск недоступен.'));
             done(rank(rows.map(function(r){return {id:r.id,title:r.title,original:r.original_title,year:r.year,description:r.short_story};}),movie));
         },fail);};
-        this.open=function(result,done,fail){api('post/'+encodeURIComponent(result.id),{},function(data){
+        this.profile=function(done,fail){api('user_profile',{},function(data){var user=data && data.user_data;maxHeight=user?(flag(user.is_pro_plus)?2160:flag(user.is_pro)?1080:720):480;done({user:user,maxHeight:maxHeight});},fail);};
+        var provider=this;
+        this.open=function(result,done,fail){
+            if(settings('filmix_token','')) return provider.profile(function(){openPost(result,done,fail);},fail);
+            maxHeight=480;openPost(result,done,fail);
+        };
+        function openPost(result,done,fail){api('post/'+encodeURIComponent(result.id),{},function(data){
             var links=data && data.player_links;
             if(!links) return fail(new Error('Filmix: у произведения нет доступного гостевого плейлиста.'));
             var voices=[],rows=[],seen={};
@@ -740,15 +747,15 @@
             if(links.playlist && Object.keys(links.playlist).length) {
                 Object.keys(links.playlist).forEach(function(s,si){Object.keys(links.playlist[s]).forEach(function(v){Object.keys(links.playlist[s][v]).forEach(function(e,ei){var f=links.playlist[s][v][e];add(v,v,+s || si+1,+e || ei+1,f);});});});
             } else list(links.movie).forEach(function(f,i){add(i,f.translation,0,1,f);});
-            if(!rows.length) return fail(new Error('Filmix: плейлист пуст.'));
+            if(!rows.length) return fail(new Error('Filmix: API вернул пустой плейлист. Проверьте токен и доступность записи.'));
             done({id:result.id,title:result.title,series:rows[0].season!=='0',voices:voices,rows:rows});
         },fail);};
         this.episodes=function(release,voice,done){done(release.rows.filter(function(e){return e.voice.id===String(voice.id);}));};
         this.resolve=function(release,ep,done,fail){
             var file=ep.data.link || '',quality={},match=file.match(/\[([\d,]+)\]/),heights=match?match[1].split(','):list(ep.data.qualities);
-            heights.map(Number).filter(function(n){return n>0 && n<=480;}).forEach(function(h){var u=absolute(file.replace(/\[[\d,]+\]|%s/,String(h)));if(u) quality[h+'p']=u;});
+            heights.map(Number).filter(function(n){return n>0 && n<=maxHeight;}).forEach(function(h){var u=absolute(file.replace(/\[[\d,]+\]|%s/,String(h)));if(u) quality[h+'p']=u;});
             // Public guest access is limited to 480p; account-only qualities are not advertised.
-            if(!Object.keys(quality).length) return fail(new Error('Filmix: для этой записи нет гостевого качества до 480p.'));
+            if(!Object.keys(quality).length) return fail(new Error('Filmix: нет видеоссылок в доступном аккаунту качестве.'));
             done({quality:quality,subtitles:[]});
         };
     }
@@ -818,19 +825,19 @@
         if (exact.length===1 && (!year || !exact[0].year || String(exact[0].year)===year)) return exact[0];
         return null;
     }
-    function maxQuality(map) {var keys=Object.keys(map||{}).filter(function (k) {return !!map[k];}).sort(function (a,b) {return qualityNumber(b)-qualityNumber(a);});var q=keys.length?qualityNumber(keys[0]):0;return q>=2160?'4K':q?q+'p':'';}
+    function maxQuality(map) {var keys=Object.keys(map||{}).filter(function (k) {return !!map[k];}).sort(function (a,b) {return qualityNumber(b)-qualityNumber(a);});var q=keys.length?qualityNumber(keys[0]):0;return q>=2160?'4K':q===1440?'2K':q===1080?'Full HD':q===720?'HD':q?String(q):'';}
     function formatDate(value) {var d=new Date(value+'T12:00:00');return isNaN(d.getTime())?'':d.toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});}
     function clock(value) {var n=Math.max(0,Math.floor(+value||0));return Math.floor(n/60)+':'+('0'+n%60).slice(-2);}
     function progressText(p,remaining) {
         var time=Math.max(0,+p.time||0),duration=Math.max(0,+p.duration||0);
         if (!duration) return time?'Просмотрено '+Math.floor(time/60)+' мин.':'';
         return remaining?'Осталось '+Math.ceil(Math.max(0,duration-time)/60)+' мин.':
-            'Просмотрено '+Math.floor(time/60)+' из '+Math.ceil(duration/60)+' мин. · '+Math.round(+p.percent||time/duration*100)+'%';
+            'Просмотрено '+(time<60?Math.floor(time)+' сек.':Math.floor(time/60)+' мин.')+' из '+Math.ceil(duration/60)+' мин. · '+Math.round(+p.percent||time/duration*100)+'%';
     }
     function keepVisible(pane,target) {
         if (!pane || !target || !pane.contains(target)) return;
         var box=pane.getBoundingClientRect(),rect=target.getBoundingClientRect(),gap=8;
-        if (pane.scrollHeight>pane.clientHeight) {
+        if (pane.scrollHeight>pane.clientHeight && !(pane.classList.contains('lp-body-pane') && pane.closest('.lamplay') && /^(horizontal|card)$/.test(pane.closest('.lamplay').getAttribute('data-view')))) {
             if (rect.bottom>box.bottom-gap) pane.scrollTop+=rect.bottom-box.bottom+gap;
             if (rect.top<box.top+gap) pane.scrollTop-=box.top-rect.top+gap;
         }
@@ -863,6 +870,7 @@
             save('migrated_010', true);
         }
         if (['https://api.anilibria.app','https://anilibria.top','https://anilibria.tv'].indexOf(String(setting('libria_host','')).replace(/\/$/,''))>=0) save('libria_host','https://aniliberty.top');
+        if(!setting('filmix_device_id','')) save('filmix_device_id',Array(17).join('0').replace(/0/g,function(){return Math.floor(Math.random()*16).toString(16);}));
         if(!flag(setting('migrated_050_source',false))) {if(!setting('source','') || setting('source','')==='kodik') save('source','rezka');save('migrated_050_source',true);}
         function buildProviders(io) {
             return [new Rezka(io, setting, new RezkaSession(io, setting, save, Lampa)), new Kodik(io, setting), new Libria(io, setting), new Filmix(io, setting), new KinoTochka(io, setting), new AniMedia(io, setting)];
@@ -934,6 +942,7 @@
             var providers = buildProviders(io), probeProviders = buildProviders(probeIo);
             var source = providers.filter(function (p) { return p.id === historySource(movie); })[0] || providers[0];
             var initialQuery = movie.title || movie.name || movie.original_title || movie.original_name || '';
+            var resultsVisible=false;
             var query = initialQuery, release = null, resultSelected = null, voice = null, season = '', episodes = [], results = null;
             var lastEpisodeKey = null, lastControl = '', returnFilter = '';
             var nativeImage=$('.full-start__background.loaded').not('.lp-native-background').last(), nativeBackground=cardBackgroundSnapshot;cardBackgroundSnapshot=null;
@@ -998,7 +1007,7 @@
                 if (/^[\d.]+(?:\s*(?:серия|эпизод))?$/i.test(fallback)) fallback='';
                 return m.name || fallback || 'Серия '+ep.number;
             }
-            function thumbnail(ep) { return imageURL(detailFor(ep).still_path,'w500') || imageURL(metadata.details.backdrop_path || metadata.details.poster_path,'w780'); }
+            function thumbnail(ep) { return imageURL(detailFor(ep).still_path,'w500') || absolute(ep.image || ep.thumbnail || ''); }
             function voiceOf(ep) { return ep.voice || voice || { id:'default',title:'' }; }
             function streamKey(ep) { return [source.id,release.id,voiceOf(ep).id,ep.season,ep.number].join('|'); }
             function stopProbes() {
@@ -1016,9 +1025,9 @@
             function failed(e) { if (destroyed) return;busy=false;setStatus(safeError(e),true);refreshControls();self.start(); }
             function cancel() { changeGeneration();busy=false;setStatus('Загрузка отменена. Измените поиск или источник.');refreshControls();self.start(); }
             function layout() {
-                var v = release ? view() : 'results';
-                html.attr('data-view',v).toggleClass('lp-series',!!release && series()).toggleClass('lp-film',!!release && !series());
-                if (release && v === 'card' || release && series() && v === 'horizontal') {
+                var v = resultsVisible ? 'results' : view();
+                html.attr('data-view',v).toggleClass('lp-series',!resultsVisible && series()).toggleClass('lp-film',!resultsVisible && !series());
+                if (v === 'card' || !resultsVisible && series() && v === 'horizontal') {
                     side.detach();main.detach();filters.append(tools);top.append(hero,filters);panel.append(top,bodyPane);
                 } else {
                     top.detach();side.append(hero,tools);main.append(filters,bodyPane);panel.append(side,main);
@@ -1031,29 +1040,18 @@
                 $('body').addClass('lp-active').toggleClass('lp-card-background',v==='card');
                 // Both the header and plugin share Lampa's single viewport background.
                 // A native full-card image is reused outside the moving activity pane.
-                var sharp=v==='card' && root.innerWidth>790 && !flag(Lampa.Storage.get('light_version',false));
+                var sharp=v==='card';
                 if(sharp && !nativeBackground) {
                     var url=imageURL(movie.backdrop_path,'w1280') || movie.background_image;
                     if(url) nativeBackground=setImage($('<img class="full-start__background loaded lp-native-background" alt="">'),url).css({position:'fixed',transition:'none',zIndex:0});
                 }
-                if(nativeBackground) {if(!nativeBackground.parent().length) $('body').prepend(nativeBackground);nativeBackground.toggle(sharp);}
+                if(nativeBackground) {if(!nativeBackground.parent().length) $('body').prepend(nativeBackground);nativeBackground.css('display',sharp?'block':'none');}
                 var bg=Lampa.Utils && Lampa.Utils.cardImgBackground ? Lampa.Utils.cardImgBackground(movie) : imageURL(movie.poster_path || movie.backdrop_path,'w200');
                 if(v!=='card') bg=imageURL(metadata.details.backdrop_path || metadata.details.poster_path,'w200');
                 if (bg && bg!==lastBackground && Lampa.Background && Lampa.Background.change) {Lampa.Background.change(bg);lastBackground=bg;}
             }
             function releaseBackground() { lastBackground='';$('body').removeClass('lp-active lp-card-background');if(nativeBackground) nativeBackground.detach(); }
-            function fitStrip() {
-                if(!release || view()==='vertical') return;
-                if(root.requestAnimationFrame) root.requestAnimationFrame(function () {
-                    if(destroyed || !html[0].isConnected) return;
-                    // Reserve the complete thumbnail, metadata and all three summary lines.
-                    top.css('min-height','');var height=body[0].scrollHeight, total=panel[0].clientHeight, gap=parseFloat(root.getComputedStyle(panel[0]).rowGap)||16;
-                    var padding=parseFloat(root.getComputedStyle(panel[0]).paddingTop)+parseFloat(root.getComputedStyle(panel[0]).paddingBottom);
-                    var available=total-padding-height-gap-12;
-                    if(view()==='horizontal') top.css('min-height',Math.max(top[0].scrollHeight,available)+'px');
-                    else top.css('min-height','');
-                });
-            }
+            function fitStrip() {top.css('min-height','');}
             function controlTarget(id) { return filters.add(tools).find('[data-lp-control]').filter(function () {return $(this).attr('data-lp-control')===id;}).first(); }
             function searchMenu() {
                 var options = searchNames(movie).map(function (q) {return {title:q,value:q};});
@@ -1075,6 +1073,8 @@
                     var voicesStrip = $('<div class="lp-strip-group"><div class="lp-caption">Перевод</div><div class="lp-scroll lp-strip"></div></div>');
                     release.voices.forEach(function (v) {control(v.title,function () {voice=v;loadEpisodes();},voicesStrip.find('.lp-strip'),String(v.id)===String(voice.id));});
                     filters.append(seasonStrip,voicesStrip);
+                } else if (!resultsVisible && series()) {
+                    ['Сезоны','Перевод'].forEach(function(label){filters.append($('<div class="lp-strip-group lp-loading-group"><div class="lp-caption"></div><div class="lp-strip"><div class="lamplay__control">Загрузка</div></div></div>').find('.lp-caption').text(label).end());});
                 }
                 control('Источник: '+source.title,function () {
                     select('Источник',providers.map(function (p) {return {title:p.title,value:p.id};}),source.id,function (id) {
@@ -1088,7 +1088,7 @@
                     save(series()?'view_series':'view_movie',next);lastControl='view';renderEpisodes(lastEpisodeKey);
                 });
                 control('Сбросить фильтр',function () {query=initialQuery;pendingResume=null;search();});
-                control('Поиск: '+query,searchMenu).attr('aria-label','Поиск');
+                control(query,searchMenu).attr({'aria-label':'Поиск: '+query,'data-lp-control':'search'}).addClass('lp-search').prepend('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/></svg>');
                 if (release) control('К результатам',backToResults);
                 if (busy) control('Отменить',cancel);
                 layout();if(restoreControl) {var restored=controlTarget(restoreControl);if(restored.length) last=restored[0];}
@@ -1113,17 +1113,22 @@
                 },failed);
             }
             function showResults() {
-                body.empty();refreshControls();renderHero();
+                resultsVisible=true;body.empty();refreshControls();renderHero();
                 setStatus(results && results.length ? 'Выберите подходящий результат: '+results.length : 'Ничего не найдено. Измените запрос или источник.');
                 (results||[]).forEach(function (r) {
                     var node=interactive($('<div class="lamplay__item lp-result"></div>'),function () {openRelease(r);});
-                    node.append($('<div class="lamplay__item-title"></div>').text(r.title),$('<div class="lamplay__item-detail"></div>').text([r.description || r.year,r.original].filter(Boolean).join(' · ')));
+                    var info=$('<div class="lp-result-info"></div>').append($('<div class="lamplay__item-title"></div>').text(r.title));
+                    if(r.original && r.original!==r.title) info.append($('<div class="lamplay__item-detail"></div>').text(r.original));
+                    var kind=typeof r.series==='boolean'?(r.series?'Сериал':'Фильм'):r.type==='tv'?'Сериал':r.type==='movie'?'Фильм':'';
+                    info.append($('<div class="lamplay__item-detail"></div>').text([r.year,kind].filter(Boolean).join(' · ')));
+                    node.append('<svg class="lp-folder" viewBox="0 0 32 32" fill="currentColor" aria-hidden="true"><path d="M3 7h10l3 3h13v17H3Z"/><path opacity=".5" d="M5 4h9l3 3h10v3H5Z"/></svg>',info);
                     body.append(node);
                 });
                 last=body.find('.selector')[0] || tools.find('.selector')[0];self.start();
             }
             function backToResults() {changeGeneration();busy=false;pendingResume=null;release=null;voice=null;episodes=[];showResults();}
             function openRelease(result) {
+                resultsVisible=false;
                 if (source.id==='rezka' && result.url) {
                     result=Object.assign({},result);var old=new root.URL(result.url);result.url=hostSetting(setting('rezka_host',''),'https://rezka.ag')+old.pathname+old.search;
                 }
@@ -1246,7 +1251,11 @@
                     var line=$('<div class="lp-progress"><i></i></div>');line.find('i').css('width',Math.max(0,Math.min(100,+p.percent||0))+'%');picture.append(line);
                     var info=$('<div class="lp-episode-info"></div>');
                     info.append($('<div class="lamplay__item-title"></div>').text(series()?episodeName(ep):v.title));
-                    if (p.time && view()==='vertical') info.append($('<div class="lp-watched"></div>').text(progressText(p,false)));
+                    if(view()==='vertical') {
+                        info.prepend($('<span class="lp-row-duration"></span>').text(duration?Math.ceil(duration/60)+' мин.':''));
+                        info.append(line.clone());
+                        info.append($('<div class="lp-watched"></div>').text(p.time?progressText(Object.assign({},p,{duration:duration}),false):' '));
+                    }
                     var details=[];if (series() && +m.vote_average>0) details.push('★ '+Number(m.vote_average).toFixed(1));
                     if (m.air_date || m.release_date) details.push(formatDate(m.air_date || m.release_date));
                     if (!series() && duration) details.push(Math.ceil(duration/60)+' мин.');
@@ -1370,7 +1379,7 @@
             this.render=function () {return html;};
             this.start=function () {
                 if (!inActivity()) return;
-                syncBackground(release?view():'results');
+                syncBackground(resultsVisible?'results':view());
                 Lampa.Controller.add('content',{toggle:function () {
                     Lampa.Controller.collectionSet(html);
                     var target=last && html[0].contains(last)?last:body.find('.selector')[0] || tools.find('.selector')[0];
@@ -1386,9 +1395,9 @@
                 if(dir==='right' && current.hasClass('lp-continue')) {var next=controlTarget(returnFilter);if(!next.length) next=filters.find('.selector').first();if(next.length) {Lampa.Controller.collectionFocus(next,html);return;}}
                 if (root.Navigator.canmove(dir)) root.Navigator.move(dir);else if (fallback) Lampa.Controller.toggle(fallback);
             }
-            this.back=function () {if (busy) return cancel();if (release) return backToResults();Lampa.Activity.backward();};
+            this.back=function () {if (busy && !release) return cancel();changeGeneration();buttonBindings.forEach(function(b){b.focusUntil=1;if(b.startComponent && b.direct) b.startComponent.last=b.direct[0];});Lampa.Activity.backward();setTimeout(function(){buttonBindings.forEach(initialFocus);},0);};
             this.pause=function () {releaseBackground();};this.stop=function () {releaseBackground();};
-            var resizeHandler=function(){if(inActivity()) syncBackground(release?view():'results');fitStrip();};root.addEventListener('resize',resizeHandler);
+            var resizeHandler=function(){if(inActivity()) syncBackground(resultsVisible?'results':view());fitStrip();};root.addEventListener('resize',resizeHandler);
             this.playerClosed=function () {if (release && !busy) renderEpisodes(lastEpisodeKey);else renderHero();};
             this.destroy=function () {releaseBackground();if(nativeBackground) nativeBackground.remove();root.removeEventListener('resize',resizeHandler);destroyed=true;if (activeScreen===self) activeScreen=null;changeGeneration();metadataIo.clear();html.remove();};
         }
@@ -1469,6 +1478,7 @@
             ".lp-series[data-view=horizontal] .lp-episode.focus .lamplay__item-detail,.lp-series[data-view=card] .lp-episode.focus .lamplay__item-detail{color:rgba(255,255,255,.8)}",
             ".lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{overflow-y:auto}",
             "\nbody.lp-active .head,body.lp-active .head__body{background:transparent!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}\nbody.lp-active .full-start__background:not(.lp-native-background){visibility:hidden}\n.lp-native-background{pointer-events:none!important}\n.lamplay .lp-backdrop{display:none!important}\n.lp-play{width:1em;height:1em;display:block;flex:none;fill:currentColor;overflow:visible}\n.lp-continue{display:flex;align-items:center;gap:.45em;border-width:2px;border-radius:1.3em;line-height:1.2;white-space:nowrap}\n.lp-title-slot{min-height:0;max-width:100%;display:flex;align-items:center}\n.lp-title-logo{width:auto;max-width:100%;height:3.7em;max-height:100%;object-fit:contain;object-position:left center}\n.lp-resume-row{display:flex;flex-direction:column;gap:.4em;min-width:0}\n.lp-resume-info{min-width:0;display:flex;flex-direction:column;gap:.18em}\n.lp-resume-title{font-size:.94em;font-weight:600;line-height:1.15}\n.lp-remaining{display:flex;align-items:center;gap:.45em;font-size:.75em}\n.lp-remaining>.lp-progress{flex:1;min-width:3em}.lp-remaining>span{flex:none}\n.lp-top{min-height:0}.lp-series[data-view=horizontal] .lp-top>.lp-hero{width:38%;height:auto;min-height:30vh;max-height:none;align-self:stretch}\n.lp-series[data-view=horizontal] .lp-filters{justify-content:space-between;gap:.75em}\n.lp-series[data-view=horizontal] .lp-panel{gap:1em}\n.lp-series[data-view=horizontal] .lp-hero-content{padding:.8em}\n.lamplay[data-view=card] .lp-panel{flex-direction:column}\n.lamplay[data-view=card] .lp-top{flex-direction:column;gap:.65em;flex:none}\n.lamplay[data-view=card] .lp-top>.lp-hero{width:100%;height:auto;min-height:0;max-height:none;overflow:visible;border-radius:0}\n.lamplay[data-view=card] .lp-hero-content{position:static;padding:.2em;justify-content:flex-start;gap:.4em}\n.lamplay[data-view=card] .lp-title-slot{height:3.8em;max-width:25em}\n.lamplay[data-view=card] .lp-title-logo{height:100%;max-width:100%}\n.lamplay[data-view=card] .lp-resume-row{flex-direction:row;align-items:center;gap:.9em}\n.lamplay[data-view=card] .lp-resume-info{max-width:28em;flex:1}.lamplay[data-view=card] .lp-continue{flex:none}\n.lamplay[data-view=card] .lp-filters{gap:.5em;font-size:.88em}\n.lamplay[data-view=card] .lp-tools{flex-direction:row}\n.lamplay[data-view=card] .lp-body-pane{flex:1;min-height:0}\n.lamplay[data-view=card] .lp-side,.lamplay[data-view=card] .lp-main{display:none}\n.lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{padding:.45em .35em}\n.lp-series[data-view=horizontal] .lp-episode,.lp-series[data-view=card] .lp-episode{overflow:visible;border:0;padding:.15em .3em}\n.lp-series[data-view=horizontal] .lp-picture,.lp-series[data-view=card] .lp-picture{overflow:hidden;border-radius:.4em;box-shadow:none;outline:0 solid transparent;outline-offset:0;isolation:isolate}\n.lp-series[data-view=horizontal] .lp-episode.lp-started .lp-picture,.lp-series[data-view=card] .lp-episode.lp-started .lp-picture{outline:1px solid rgba(255,255,255,.5);outline-offset:1px}\n.lp-series[data-view=horizontal] .lp-episode.focus .lp-picture,.lp-series[data-view=card] .lp-episode.focus .lp-picture{box-shadow:none;outline:.17em solid #fff;outline-offset:.17em}\n.lp-picture:after{content:'';position:absolute;left:0;right:0;bottom:0;height:32%;background:linear-gradient(transparent,rgba(0,0,0,.75));z-index:0;pointer-events:none}\n.lp-picture .lp-progress,.lp-runtime,.lp-percent{z-index:1}\n.lp-picture .lp-progress{left:.4em;right:.4em;bottom:.4em;height:.22em;min-height:3px;background:rgba(255,255,255,.45)}\n.lp-runtime,.lp-percent{position:absolute;bottom:1.05em;font-size:.78em;line-height:1;font-weight:600;text-shadow:0 1px 3px #000;background:none;padding:0}\n.lp-runtime{right:.5em}.lp-percent{left:.5em}\n.lp-focus-play{display:none;position:absolute;top:0;right:0;bottom:0;left:0;z-index:2;align-items:center;justify-content:center;pointer-events:none}\n.lp-focus-play .lp-play{width:2em;height:2em;filter:drop-shadow(0 1px 3px #0006)}\n.lp-episode.focus .lp-focus-play{display:flex}\n.lp-series[data-view=horizontal] .lp-quality,.lp-series[data-view=card] .lp-quality{display:none!important}\n.lp-episode-meta{display:flex;align-items:center;gap:.5em;flex-wrap:wrap;margin:.15em 0 .4em;font-size:.76em}\n.lp-quality-meta{display:inline-block;padding:.1em .25em;border-radius:.2em;background:rgba(255,255,255,.25);font-weight:600}.lp-quality-meta:empty,.lp-episode-meta>span:empty{display:none}\n.lp-series[data-view=vertical] .lp-quality-meta{display:none}\n.lp-series[data-view=horizontal] .lp-description,.lp-series[data-view=card] .lp-description{display:block;-webkit-line-clamp:unset;overflow:visible;font-size:.8em;line-height:1.3}\n.lp-series[data-view=horizontal] .lp-episode-info,.lp-series[data-view=card] .lp-episode-info{overflow:visible;padding:.5em .05em .2em}\n.lp-series[data-view=horizontal] .lp-episode.focus .lp-progress i,.lp-series[data-view=card] .lp-episode.focus .lp-progress i{background:#fff}\n.full-start-new__title.lp-logo-slot,.full-start__title.lp-logo-slot{font-size:1em!important;display:flex;align-items:center;height:6.5em;max-height:22vh;padding:.55em 0 .85em;margin:0 0 .7em;overflow:visible;line-height:1}\n.lp-logo-slot+.full-start-new__tagline{margin-top:0}\n.lamplay-card-logo{display:block;width:auto;max-width:100%;max-height:100%;height:100%;object-fit:contain;object-position:left center}\n.lp-settings-icon{width:1.7em;height:1.7em;margin-right:.8em;display:flex;align-items:center;justify-content:center;flex:none;color:inherit}\n.lp-settings-icon svg{width:100%;height:100%;fill:currentColor}.lp-hd-icon{display:block;width:100%;height:100%;background:currentColor;mask-size:contain;-webkit-mask-size:contain;mask-repeat:no-repeat;-webkit-mask-repeat:no-repeat}\n.lp-settings-row{display:flex;align-items:center}.lp-settings-row>.settings-param__name{flex:1}\nbody.glass--style .settings-folder[data-component^=lamplay_] .settings-folder__icon{filter:none!important;-webkit-filter:none!important}\n@media(max-height:650px){.lamplay[data-view=card] .lp-title-slot{height:2.8em}.lamplay[data-view=card] .lp-top{gap:.4em}.lamplay[data-view=card] .lp-filters{gap:.35em}.lp-series[data-view=horizontal] .lp-top>.lp-hero{min-height:27vh}.lp-hero-content{gap:.3em}.lp-title-logo{height:2.8em}}\n@media(max-width:700px){.lamplay[data-view=card] .lp-resume-row{flex-direction:column;align-items:flex-start}.lamplay[data-view=card] .lp-resume-info{max-width:100%}.lp-series[data-view=horizontal] .lp-top>.lp-hero{width:40%;min-height:11em}.lp-series[data-view=horizontal] .lp-hero-content{padding:.4em}.lp-continue{font-size:.85em}.lp-resume-detail{font-size:.75em}}\n"
+            ,"\n.lp-search{display:flex;align-items:center;gap:.5em}.lp-search svg{width:1.25em;height:1.25em;flex:none}\n.lp-native-background{display:block;animation:none!important;max-width:none;visibility:visible!important}\nbody.lp-card-background .background{visibility:hidden}\n.lp-series[data-view=horizontal] .lp-top{height:31vh;min-height:0;flex:none}\n.lp-series[data-view=horizontal] .lp-top>.lp-hero{width:34%;height:100%;min-height:0;max-height:none;align-self:flex-start}\n.lp-series[data-view=horizontal] .lp-filters{justify-content:flex-start;gap:.4em;font-size:.85em}\n.lp-series[data-view=horizontal] .lp-tools{margin-top:auto}\n.lp-series[data-view=horizontal] .lp-title-slot{height:2.4em;width:65%;max-width:14em;align-self:center;justify-content:center;flex:none}\n.lp-series[data-view=horizontal] .lp-title-logo{height:auto;width:auto;max-width:100%;max-height:100%;object-position:center}\n.lp-series[data-view=horizontal] .lp-resume-row{flex-direction:row;align-items:center;gap:.5em;font-size:.8em}\n.lp-series[data-view=horizontal] .lp-resume-info{flex:1;font-size:.87em}\n.lp-series[data-view=horizontal] .lp-hero-content{padding:.6em .6em .9em}\n.lp-series[data-view=horizontal] .lp-remaining>.lp-progress{position:absolute;left:.6em;right:.6em;bottom:.35em}\n.lamplay[data-view=card] .lp-title-slot{height:2.8em;width:20em;max-width:30vw;flex:none}\n.lamplay[data-view=card] .lp-title-logo{height:auto;width:auto;max-width:100%;max-height:100%}\n.lamplay[data-view=card] .lp-hero-content{height:5.4em;box-sizing:border-box}\n.lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{overflow-y:hidden}\n.lp-series[data-view=horizontal] .lp-description,.lp-series[data-view=card] .lp-description{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;font-size:.76em;line-height:1.3;max-height:3.9em;margin-top:.3em}\n.lp-series[data-view=horizontal] .lp-episode-info,.lp-series[data-view=card] .lp-episode-info{overflow:hidden;padding:.35em .05em .15em}\n.lp-series[data-view=horizontal] .lp-picture,.lp-series[data-view=card] .lp-picture{height:12.375vw}\n.lp-series[data-view=horizontal] .lp-episode,.lp-series[data-view=card] .lp-episode{width:22vw;min-width:0}\n.lp-series[data-view=horizontal] .lp-quality,.lp-series[data-view=card] .lp-quality{display:block!important;z-index:3}\n.lp-series[data-view=horizontal] .lp-quality:empty,.lp-series[data-view=card] .lp-quality:empty{display:none!important}\n.lp-series[data-view=horizontal] .lp-quality-meta,.lp-series[data-view=card] .lp-quality-meta{display:none!important}\n.lamplay[data-view=vertical] .lp-picture .lp-runtime,.lamplay[data-view=vertical] .lp-picture .lp-percent,.lamplay[data-view=vertical] .lp-picture .lp-progress,.lamplay[data-view=vertical] .lp-picture .lp-quality,.lamplay[data-view=vertical] .lp-picture:after{display:none!important}\n.lamplay[data-view=vertical] .lp-episode-info{position:relative;padding:.5em .7em;display:flex;flex-direction:column;gap:.2em}\n.lamplay[data-view=vertical] .lp-episode-info>.lamplay__item-title{padding-right:4em}\n.lp-row-duration{position:absolute;right:.7em;top:.6em;font-size:.78em}\n.lamplay[data-view=vertical] .lp-episode-info>.lp-progress{flex:none;margin:.2em 0 0;height:.18em;background:#ffffff55}\n.lamplay[data-view=vertical] .lp-watched{font-size:.72em;min-height:1.2em;margin:0}\n.lamplay[data-view=vertical] .lp-episode-meta{margin-top:auto;margin-bottom:0;padding-right:4em}\n.lamplay[data-view=vertical] .lp-quality-meta{display:block;position:absolute;right:.7em;bottom:.5em;background:none}\n.lamplay[data-view=vertical] .lp-quality-meta:empty{display:none}\n.lp-result{display:flex;align-items:center;gap:.8em;min-height:5.4em}.lp-result-info{min-width:0}.lp-result .lamplay__item-detail{margin-top:.3em}.lp-folder{width:2.5em;height:2.5em;flex:none}\n.lamplay[data-view=results] .lp-main{padding-top:2.5em}\n.full-start-new__title.lp-logo-slot,.full-start__title.lp-logo-slot{box-sizing:border-box;height:7em;max-height:23vh;max-width:30em;padding:1em 0;margin:0 0 .5em;align-items:center;justify-content:flex-start;display:flex!important}\n.lamplay-card-logo{height:auto!important;width:auto!important;max-height:100%!important;max-width:min(25em,38vw)!important;object-fit:contain}\n.lp-settings-icon svg[fill=none],.settings-folder__icon svg[fill=none]{fill:none!important}\n.lp-settings-icon svg[fill=none] [fill=currentColor]{fill:currentColor}\n@media(max-height:650px){.lp-series[data-view=horizontal] .lp-top{height:32vh}.lamplay[data-view=card] .lp-hero-content{height:4em}.lamplay[data-view=card] .lp-title-slot{height:2.3em}.lp-series[data-view=horizontal] .lp-resume-row{font-size:.7em}.lp-series[data-view=horizontal] .lp-filters{font-size:.78em}.lp-episode-meta{font-size:.7em}.lp-series .lp-episode-info>.lamplay__item-title{font-size:.9em}.lp-panel{gap:.4em}.lamplay[data-view=card] .lp-top{gap:.25em}.lamplay[data-view=card] .lp-filters{gap:.2em;font-size:.78em}.lp-series[data-view=card] .lp-description{font-size:.7em}.lp-series[data-view=card] .lp-episode-info{padding-top:.2em}}\n@media(max-width:700px){.lp-series[data-view=horizontal] .lp-top{height:28vh}.lp-series[data-view=horizontal] .lp-top>.lp-hero{width:42%}.lp-series[data-view=horizontal] .lp-resume-row{flex-direction:column;align-items:flex-start}.lamplay[data-view=card] .lp-title-slot{max-width:65vw}.lamplay-card-logo{max-width:65vw!important}}\n"
         ].join('\n')).appendTo('head');
         Lampa.Component.add(KEY, Screen);
         var buttonBindings = [];
@@ -2139,7 +2149,7 @@
 
         }
 
-        var menuIcons={"kodik": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" fill=\"currentColor\"><path d=\"M5 4h5v10h4L23 4h6L18 16l11 12h-6L14 18h-4v10H5Z\"/></svg>", "anilibria": "<svg version=\"1.0\" xmlns=\"http://www.w3.org/2000/svg\" width=\"512.000000pt\" height=\"512.000000pt\" viewBox=\"0 0 512.000000 512.000000\" preserveAspectRatio=\"xMidYMid meet\"><metadata>Created by potrace 1.11, written by Peter Selinger 2001-2013</metadata><g transform=\"translate(0.000000,512.000000) scale(0.100000,-0.100000)\"fill=\"currentColor\" stroke=\"none\"><path d=\"M2468 4660 c-5 -14 -21 -56 -35 -95 -13 -38 -37 -106 -53 -150 -16-44 -76 -213 -134 -375 -57 -162 -120 -340 -140 -395 -19 -55 -56 -158 -81-230 -26 -71 -62 -175 -82 -230 -19 -55 -38 -103 -41 -107 -6 -5 -126 198-503 855 -236 412 -422 733 -430 741 -4 5 -54 -21 -115 -60 -59 -38 -112 -71-117 -73 -5 -2 -41 -24 -81 -50 -39 -26 -105 -69 -147 -96 l-75 -48 99 -176c54 -97 110 -196 124 -221 14 -25 40 -70 56 -100 17 -30 41 -72 54 -92 13 -2123 -39 23 -42 0 -2 25 -48 56 -102 31 -55 66 -117 78 -139 13 -22 65 -114 116-205 51 -91 103 -183 115 -205 13 -22 121 -213 240 -425 203 -361 216 -387207 -415 -6 -16 -50 -140 -98 -275 -47 -135 -90 -256 -95 -270 -4 -14 -26 -77-49 -140 -23 -63 -55 -153 -71 -200 -16 -47 -32 -92 -36 -100 -3 -8 -7 -19 -9-25 -1 -5 -41 -118 -89 -250 -47 -132 -99 -278 -115 -325 -15 -47 -38 -109-49 -138 -12 -29 -21 -56 -21 -60 0 -4 161 -8 357 -7 l357 0 37 140 c20 77 80304 134 505 54 201 105 393 113 427 9 35 19 63 23 63 5 0 180 -305 327 -57014 -25 40 -71 58 -103 19 -32 34 -62 34 -68 0 -5 3 -9 6 -9 3 0 76 46 162 102279 180 315 204 448 290 72 47 149 97 172 112 l41 26 15 -53 c9 -28 27 -95 42-147 14 -52 28 -102 30 -110 5 -15 -50 -53 -616 -419 -63 -40 -119 -77 -124-82 -4 -4 4 -30 19 -58 l28 -51 31 19 c17 10 60 34 96 53 120 65 214 115 414223 109 59 202 103 206 98 4 -4 22 -62 39 -128 17 -66 41 -152 52 -190 l21-71 359 1 c198 0 359 2 359 5 0 3 -25 88 -56 190 -31 102 -58 196 -60 209 -314 -8 29 -11 34 -3 5 -11 30 -18 55 -7 26 -26 90 -42 143 l-30 95 191 102c105 56 218 117 251 135 33 18 102 55 153 82 50 27 92 54 92 60 0 5 -23 72-51 147 -50 133 -52 137 -74 125 -12 -7 -100 -63 -196 -125 -422 -275 -433-282 -440 -269 -12 21 -93 307 -88 311 2 2 90 59 194 126 444 288 447 290 440308 -4 9 -52 152 -107 317 -56 165 -104 304 -108 308 -4 4 -145 -80 -314 -189-169 -108 -309 -194 -311 -192 -5 5 -169 547 -274 908 -17 58 -35 119 -41 135-5 17 -72 242 -150 500 -77 259 -151 506 -164 550 -14 44 -31 101 -38 128l-12 47 -96 0 c-52 1 -157 2 -234 3 l-138 2 -10 -25z m125 -927 c2 -16 57-219 122 -453 64 -234 119 -436 121 -449 3 -14 7 -28 10 -33 3 -4 7 -18 9 -293 -12 15 -61 29 -108 22 -79 35 -130 41 -156 2 -5 10 -35 19 -66 9 -31 18 -6521 -75 2 -11 14 -53 25 -94 26 -89 60 -221 60 -229 0 -4 -15 -15 -32 -26 -18-10 -109 -67 -201 -127 -93 -59 -170 -108 -172 -108 -3 0 -194 328 -233 400-7 14 -22 39 -32 55 -11 17 -23 36 -26 44 -4 7 -33 58 -64 113 l-58 99 15 52c8 29 15 57 17 62 2 6 6 24 11 40 4 17 41 156 82 310 41 154 77 287 79 295 522 19 72 48 180 14 52 40 150 58 217 17 67 34 120 38 118 4 -3 10 -17 13 -32z\"/></g></svg>", "extra": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M4 8h4m6 0h14M4 16h15m6 0h3M4 24h6m6 0h12\"/><circle cx=\"11\" cy=\"8\" r=\"3\"/><circle cx=\"22\" cy=\"16\" r=\"3\"/><circle cx=\"13\" cy=\"24\" r=\"3\"/></svg>", "rating": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m16 3.5 3.8 7.7 8.5 1.2-6.2 6 1.5 8.5-7.6-4-7.6 4 1.5-8.5-6.2-6 8.5-1.2Z\"/></svg>", "about": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"16\" cy=\"16\" r=\"12\"/><path d=\"M16 14v9\"/><circle cx=\"16\" cy=\"9.2\" r=\"1.1\" fill=\"currentColor\" stroke=\"none\"/></svg>", "hdrezka": "<span class=\"lp-hd-icon\" style=\"mask-image:url(data:image/png;base64,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);-webkit-mask-image:url(data:image/png;base64,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)\"></span>"};
+        var menuIcons={"kodik": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" fill=\"currentColor\"><path d=\"M5 4h5v10h4L23 4h6L18 16l11 12h-6L14 18h-4v10H5Z\"/></svg>", "anilibria": "<svg version=\"1.0\" xmlns=\"http://www.w3.org/2000/svg\"\n width=\"512.000000pt\" height=\"512.000000pt\" viewBox=\"40 40 432 432\"\n preserveAspectRatio=\"xMidYMid meet\">\n<metadata>\nCreated by potrace 1.11, written by Peter Selinger 2001-2013\n</metadata>\n<g transform=\"translate(0.000000,512.000000) scale(0.100000,-0.100000)\"\nfill=\"currentColor\" stroke=\"none\">\n<path d=\"M2468 4660 c-5 -14 -21 -56 -35 -95 -13 -38 -37 -106 -53 -150 -16\n-44 -76 -213 -134 -375 -57 -162 -120 -340 -140 -395 -19 -55 -56 -158 -81\n-230 -26 -71 -62 -175 -82 -230 -19 -55 -38 -103 -41 -107 -6 -5 -126 198\n-503 855 -236 412 -422 733 -430 741 -4 5 -54 -21 -115 -60 -59 -38 -112 -71\n-117 -73 -5 -2 -41 -24 -81 -50 -39 -26 -105 -69 -147 -96 l-75 -48 99 -176\nc54 -97 110 -196 124 -221 14 -25 40 -70 56 -100 17 -30 41 -72 54 -92 13 -21\n23 -39 23 -42 0 -2 25 -48 56 -102 31 -55 66 -117 78 -139 13 -22 65 -114 116\n-205 51 -91 103 -183 115 -205 13 -22 121 -213 240 -425 203 -361 216 -387\n207 -415 -6 -16 -50 -140 -98 -275 -47 -135 -90 -256 -95 -270 -4 -14 -26 -77\n-49 -140 -23 -63 -55 -153 -71 -200 -16 -47 -32 -92 -36 -100 -3 -8 -7 -19 -9\n-25 -1 -5 -41 -118 -89 -250 -47 -132 -99 -278 -115 -325 -15 -47 -38 -109\n-49 -138 -12 -29 -21 -56 -21 -60 0 -4 161 -8 357 -7 l357 0 37 140 c20 77 80\n304 134 505 54 201 105 393 113 427 9 35 19 63 23 63 5 0 180 -305 327 -570\n14 -25 40 -71 58 -103 19 -32 34 -62 34 -68 0 -5 3 -9 6 -9 3 0 76 46 162 102\n279 180 315 204 448 290 72 47 149 97 172 112 l41 26 15 -53 c9 -28 27 -95 42\n-147 14 -52 28 -102 30 -110 5 -15 -50 -53 -616 -419 -63 -40 -119 -77 -124\n-82 -4 -4 4 -30 19 -58 l28 -51 31 19 c17 10 60 34 96 53 120 65 214 115 414\n223 109 59 202 103 206 98 4 -4 22 -62 39 -128 17 -66 41 -152 52 -190 l21\n-71 359 1 c198 0 359 2 359 5 0 3 -25 88 -56 190 -31 102 -58 196 -60 209 -3\n14 -8 29 -11 34 -3 5 -11 30 -18 55 -7 26 -26 90 -42 143 l-30 95 191 102\nc105 56 218 117 251 135 33 18 102 55 153 82 50 27 92 54 92 60 0 5 -23 72\n-51 147 -50 133 -52 137 -74 125 -12 -7 -100 -63 -196 -125 -422 -275 -433\n-282 -440 -269 -12 21 -93 307 -88 311 2 2 90 59 194 126 444 288 447 290 440\n308 -4 9 -52 152 -107 317 -56 165 -104 304 -108 308 -4 4 -145 -80 -314 -189\n-169 -108 -309 -194 -311 -192 -5 5 -169 547 -274 908 -17 58 -35 119 -41 135\n-5 17 -72 242 -150 500 -77 259 -151 506 -164 550 -14 44 -31 101 -38 128\nl-12 47 -96 0 c-52 1 -157 2 -234 3 l-138 2 -10 -25z m125 -927 c2 -16 57\n-219 122 -453 64 -234 119 -436 121 -449 3 -14 7 -28 10 -33 3 -4 7 -18 9 -29\n3 -12 15 -61 29 -108 22 -79 35 -130 41 -156 2 -5 10 -35 19 -66 9 -31 18 -65\n21 -75 2 -11 14 -53 25 -94 26 -89 60 -221 60 -229 0 -4 -15 -15 -32 -26 -18\n-10 -109 -67 -201 -127 -93 -59 -170 -108 -172 -108 -3 0 -194 328 -233 400\n-7 14 -22 39 -32 55 -11 17 -23 36 -26 44 -4 7 -33 58 -64 113 l-58 99 15 52\nc8 29 15 57 17 62 2 6 6 24 11 40 4 17 41 156 82 310 41 154 77 287 79 295 5\n22 19 72 48 180 14 52 40 150 58 217 17 67 34 120 38 118 4 -3 10 -17 13 -32z\"/>\n</g>\n</svg>\n", "extra": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M4 8h4m6 0h14M4 16h15m6 0h3M4 24h6m6 0h12\"/><circle cx=\"11\" cy=\"8\" r=\"3\"/><circle cx=\"22\" cy=\"16\" r=\"3\"/><circle cx=\"13\" cy=\"24\" r=\"3\"/></svg>", "rating": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m16 3.5 3.8 7.7 8.5 1.2-6.2 6 1.5 8.5-7.6-4-7.6 4 1.5-8.5-6.2-6 8.5-1.2Z\"/></svg>", "about": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"16\" cy=\"16\" r=\"12\"/><path d=\"M16 14v9\"/><circle cx=\"16\" cy=\"9.2\" r=\"1.1\" fill=\"currentColor\" stroke=\"none\"/></svg>", "hdrezka": "<span class=\"lp-hd-icon\" style=\"mask-image:url(data:image/png;base64,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);-webkit-mask-image:url(data:image/png;base64,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)\"></span>"};
         function menuIcon(item,id) {if(!item.find('.lp-settings-icon').length) item.addClass('lp-settings-row').prepend($('<span class="lp-settings-icon" aria-hidden="true"></span>').append(menuIcons[id]));}
         var childMenus = [];
         function param(name, type, label, value, values, description, component, onChange) {
@@ -2184,6 +2194,7 @@
         var rezkaMenu = KEY + '_rezka_settings', kodikMenu = KEY + '_kodik_settings';
         var libriaMenu = KEY + '_libria_settings', extraMenu = KEY + '_extra_settings';
         submenu(rezkaMenu, 'HDrezka','hdrezka'); submenu(kodikMenu, 'Kodik','kodik'); submenu(libriaMenu, 'AniLiberty','anilibria'); submenu(extraMenu, 'Дополнительно','extra');
+        var filmixMenu=KEY+'_filmix_settings';submenu(filmixMenu,'Filmix','extra');
         var authIo = new Transport(Lampa, setting), authSession = new RezkaSession(authIo, setting, save, Lampa);
         var passwordDraft = String(setting('rezka_password', '') || ''), authBusy = false, authStatusNode = null, passwordStatusNode = null;
         function rezkaHost() { return hostSetting(setting('rezka_host', ''), 'https://rezka.ag'); }
@@ -2235,11 +2246,14 @@
         param('rezka_stream_host', 'input', 'Фиксированный домен видеопотока', 'https://femeretes.org', '',
             'Применяется при включённой фиксации потока. Работа зависит от доступности CDN.', rezkaMenu);
         param('kodik_host', 'input', 'Адрес API', 'https://kodik-api.com', '', '', kodikMenu);
-        param('kodik_token', 'input', 'Свой API-токен', '', '', 'Пусто — подбор через get-player. Свой токен включает поиск через API.', kodikMenu);
+        param('kodik_token', 'input', 'Свой API-токен', '', '', 'Пусто - подбор через get-player. Свой токен включает поиск через API.', kodikMenu);
         param('libria_host', 'input', 'Адрес API', 'https://aniliberty.top', '', '', libriaMenu);
-        param('filmix_host','input','Filmix — адрес API','http://filmixapp.cyou','','Гостевой доступ до 480p. Нужны HTTP-версия Lampa и нативные запросы с заголовком User-Agent; обычный браузер не поддерживает его смену.',extraMenu);
-        param('kinotochka_host','input','KinoTochka — сайт','https://kinovibe.cc','','Прямые запросы требуют поддержки сайтом CORS либо нативных запросов устройства.',extraMenu);
-        param('animedia_host','input','AniMedia — сайт','https://amd.online','','Собственный плеер AniMedia. Некоторые релизы используют другие плееры и недоступны.',extraMenu);
+        param('filmix_host','input','Filmix - адрес API','http://filmixapp.cyou','','Адрес сервиса API. Для HTTP-адреса сама Lampa также должна быть открыта по HTTP.',filmixMenu);
+        param('filmix_token','input','Токен устройства Filmix','','','Необязательно. Без токена используется гостевой доступ до 480. Токен не устраняет ограничения прямого подключения.',filmixMenu);
+        param('filmix_device_id','input','Идентификатор устройства',setting('filmix_device_id',''),'','Сохраняется между запусками. Для токена укажите связанный с ним идентификатор устройства.',filmixMenu);
+        buttonParam(filmixMenu,'filmix_profile','Проверить доступ аккаунта',function(){var network=new Transport(Lampa,setting);new Filmix(network,setting).profile(function(p){Lampa.Noty.show(p.user?'Filmix: доступное качество до '+p.maxHeight:'Filmix: гостевой доступ до 480');},function(e){Lampa.Noty.show(safeError(e));});},'Проверяет токен прямым запросом к API Filmix.');
+        param('kinotochka_host','input','KinoTochka - сайт','https://kinovibe.cc','','Прямые запросы требуют поддержки сайтом CORS либо нативных запросов устройства.',extraMenu);
+        param('animedia_host','input','AniMedia - сайт','https://amd.online','','Собственный плеер AniMedia. Некоторые релизы используют другие плееры и недоступны.',extraMenu);
         param('timeout', 'select', 'Ожидание ответа', '15', { '10': '10 сек.', '15': '15 сек.', '30': '30 сек.' }, '', extraMenu);
         var ratingsMenu=KEY+'_ratings_settings';
         submenu(ratingsMenu,'Рейтинг','rating');
@@ -2249,7 +2263,7 @@
         ratingsParam('priority','select','Приоритет рейтинга','imdb',{imdb:'IMDb',kp:'Кинопоиск',tmdb:'TMDB'});
         ratingsParam('list_color','trigger','Цветной рейтинг в списках',true);
         ratingsParam('full_color','trigger','Цветные рейтинги внутри карточки',true);
-        ratingsParam('scale','select','Цветовая шкала','detailed',{detailed:'Подробная — четыре цвета',simple:'Простая — три цвета'});
+        ratingsParam('scale','select','Цветовая шкала','detailed',{detailed:'Подробная - четыре цвета',simple:'Простая - три цвета'});
         buttonParam(ratingsMenu,'ratings_clear','Очистить кэш рейтингов',function () {ratingsModule.clear();},'Оценки хранятся сутки и загружаются через источник метаданных Lampa.');
         ratingsModule.setEnabled(setting('ratings_enabled',false));
         buttonParam(KEY, 'about', 'О плагине', function () {
