@@ -1,10 +1,10 @@
-/* LamPlay by WaterFAQ - 0.12.0 (experimental)
+/* LamPlay by WaterFAQ - 0.13.0 (experimental)
  * Independent Lampa plugin. Direct connections only; no proxy or remote code execution.
  * Providers: HDrezka, Kodik, AniLiberty, Filmix, CDNvideohub, KinoTochka, VeoVeo.
  */
 (function (root) {
     'use strict';
-    var VERSION = '0.12.0';
+    var VERSION = '0.13.0';
     var RELEASE_DATE = '04.11.2026';
     var KEY = 'lamplay';
     var NAME = 'LamPlay';
@@ -1018,20 +1018,34 @@
         }
         var nextActivated=0;
         function nextTile(){return currentPlayback && Lampa.PlayerPanel && Lampa.PlayerPanel.render ? Lampa.PlayerPanel.render().find('.lp-next-action').first():$();}
+        function focusPlayerTimeline(){
+            var panel=Lampa.PlayerPanel && Lampa.PlayerPanel.render && Lampa.PlayerPanel.render(),timeline=panel && panel.find('.player-panel__timeline').first();
+            if(timeline && timeline.length){Lampa.Controller.collectionSet(panel);Lampa.Controller.collectionFocus(timeline[0],panel);}
+        }
         Lampa.Controller.add('lamplay_next',{
             toggle:function(){var tile=nextTile();if(!tile.length)return Lampa.Controller.toggle('player_rewind');var panel=Lampa.PlayerPanel.render();Lampa.Controller.collectionSet(panel);Lampa.Controller.collectionFocus(tile[0],panel);},
-            down:function(){Lampa.Controller.toggle('player_rewind');},up:function(){Lampa.Controller.toggle('player');},
+            down:function(){Lampa.Controller.toggle('player_rewind');},
+            up:function(){Lampa.Controller.toggle('player');if(Lampa.PlayerPanel && Lampa.PlayerPanel.hide)Lampa.PlayerPanel.hide();},
             left:function(){Lampa.Controller.toggle('player_rewind');},right:function(){Lampa.Controller.toggle('player_rewind');},
             enter:function(){nextTile().trigger('hover:enter');},back:function(){Lampa.Controller.toggle('player_panel');},
             gone:function(){nextTile().removeClass('focus');}
         });
-        // Native rewind navigation otherwise jumps over the informational tile.
-        root.document.addEventListener('keydown',function(e){
-            var enabled=Lampa.Controller.enabled && Lampa.Controller.enabled();
-            if((e.key==='ArrowUp' || e.keyCode===38) && enabled && enabled.name==='player_rewind' && nextTile().length && !$('.player-skip.selector').not('.hide').length){
-                e.preventDefault();e.stopImmediatePropagation();Lampa.Controller.toggle('lamplay_next');
+        // Extend only the native rewind controller. A key must never traverse two levels.
+        if(Lampa.Controller.listener)Lampa.Controller.listener.follow('toggle',function(e){
+            if(!currentPlayback || !e || e.name!=='player_rewind')return;
+            var state=Lampa.Controller.enabled(),controller=state && state.controller;
+            if(!controller)return;
+            focusPlayerTimeline();
+            if(controller.up && !controller.up._lpNextUp){
+                var originalUp=controller.up;
+                var up=function(){
+                    var tile=nextTile(),panel=Lampa.PlayerPanel.render();
+                    if(currentPlayback && tile.length && panel.hasClass('panel--visible') && !panel.find('.player-skip.selector').not('.hide').length)return Lampa.Controller.toggle('lamplay_next');
+                    return originalUp.apply(this,arguments);
+                };
+                up._lpNextUp=true;controller.up=up;
             }
-        },true);
+        });
         function paintNextLabel(event) {
             if (!Lampa.PlayerPanel || !Lampa.PlayerPanel.render || !currentPlayback) return;
             var rendered=Lampa.PlayerPanel.render();
@@ -1216,13 +1230,40 @@
                 if (bg && bg!==lastBackground && Lampa.Background && Lampa.Background.change) {Lampa.Background.change(bg);lastBackground=bg;}
             }
             function releaseBackground() { lastBackground='';$('body').removeClass('lp-active lp-card-background');if(nativeBackground) nativeBackground.detach();vignette.detach(); }
-            function fitEpisodeGeometry(){
-                // Card width belongs to the horizontal layout, never to leftover height.
-                // Keep native vertical scrolling on short screens instead of shrinking thumbnails.
-                if(view()==='vertical' || !html[0].isConnected)return;
-                body.find('.lp-episode').css('width','').find('.lp-picture').css('height','');
+            var geometryFrame=null,geometryRunning=false;
+            function edgeFade(pane,horizontal){
+                var pos=horizontal?pane.scrollLeft:pane.scrollTop,size=horizontal?pane.clientWidth:pane.clientHeight,total=horizontal?pane.scrollWidth:pane.scrollHeight;
+                var before=pos>2,after=pos+size<total-2,fade=Math.min(72,Math.max(32,parseFloat(root.getComputedStyle(html[0]).fontSize)*2.8));
+                var stops=before?['transparent 0px','rgba(0,0,0,.22) '+(fade*.3)+'px','rgba(0,0,0,.7) '+(fade*.7)+'px','#000 '+fade+'px']:['#000 0px'];
+                stops=stops.concat(after?['#000 calc(100% - '+fade+'px)','rgba(0,0,0,.7) calc(100% - '+(fade*.7)+'px)','rgba(0,0,0,.22) calc(100% - '+(fade*.3)+'px)','transparent 100%']:['#000 100%']);
+                var mask='linear-gradient(to '+(horizontal?'right':'bottom')+','+stops.join(',')+')';
+                $(pane).css({'mask-image':mask,'-webkit-mask-image':mask}).attr({'data-lp-fade-before':String(before),'data-lp-fade-after':String(after)});
             }
-            function fitStrip() {top.css('min-height','');setTimeout(function(){if(destroyed)return;html.find('.lp-control-value').each(function(){$(this).toggleClass('lp-clipped',this.scrollWidth>this.clientWidth+1);});},0);}
+            function fitEpisodeGeometry(){
+                if(geometryRunning || !html[0].isConnected)return;geometryRunning=true;
+                var v=resultsVisible?'results':view(),bounds=html[0].getBoundingClientRect();html.removeClass('lp-tight');
+                if(v==='results'){html.css('height','');bodyPane.css({'margin-left':'',width:'','padding-left':'','padding-right':'','mask-image':'none','-webkit-mask-image':'none'}).off('scroll.lpEdges');html.find('.lp-strip,.lp-tools').css({width:'','max-width':'','mask-image':'none','-webkit-mask-image':'none'}).off('scroll.lpEdges');geometryRunning=false;return;}
+                html.css('height',Math.max(120,root.innerHeight-Math.max(0,bounds.top))+'px');
+                body.find('.lp-episode').css('width','').find('.lp-picture').css('height','');
+                var sideways=series() && (v==='horizontal' || v==='card');
+                bodyPane.css({'margin-left':'',width:'','padding-left':'','padding-right':''});
+                html.find('.lp-strip,.lp-tools').each(function(){
+                    var row=$(this),across=row.hasClass('lp-strip') || v!=='vertical';
+                    row.css({width:'','max-width':''});
+                    if(across){var box=this.getBoundingClientRect();row.css({width:Math.max(0,bounds.right-box.left)+'px','max-width':'none'});edgeFade(this,true);row.off('scroll.lpEdges').on('scroll.lpEdges',function(){edgeFade(this,true);});}
+                    else row.css({'mask-image':'none','-webkit-mask-image':'none'}).off('scroll.lpEdges');
+                });
+                if(sideways){
+                    var box=bodyPane[0].getBoundingClientRect(),style=root.getComputedStyle(bodyPane[0]),left=box.left-bounds.left,right=bounds.right-box.right;
+                    bodyPane.css({'margin-left':-left+'px',width:bounds.width+'px','padding-left':Math.max(0,left+parseFloat(style.paddingLeft))+'px','padding-right':Math.max(0,right+parseFloat(style.paddingRight))+'px'});
+                }
+                if(sideways){var rowHeight=body[0].getBoundingClientRect().height,style=root.getComputedStyle(bodyPane[0]),required=rowHeight+parseFloat(style.paddingTop)+parseFloat(style.paddingBottom)+8;html.toggleClass('lp-tight',required>bodyPane[0].clientHeight);}
+                html.find('.lp-strip,.lp-tools').each(function(){if($(this).hasClass('lp-strip') || v!=='vertical')edgeFade(this,true);});
+                if(release && series() && !errorMessage){edgeFade(bodyPane[0],sideways);bodyPane.off('scroll.lpEdges').on('scroll.lpEdges',function(){edgeFade(this,sideways);});}
+                else bodyPane.css({'mask-image':'none','-webkit-mask-image':'none'}).off('scroll.lpEdges');
+                geometryRunning=false;
+            }
+            function fitStrip() {top.css('min-height','');if(geometryFrame){if(root.cancelAnimationFrame)root.cancelAnimationFrame(geometryFrame);else clearTimeout(geometryFrame);}var refresh=function(){geometryFrame=null;if(destroyed)return;fitEpisodeGeometry();html.find('.lp-control-value').each(function(){$(this).toggleClass('lp-clipped',this.scrollWidth>this.clientWidth+1);});};geometryFrame=root.requestAnimationFrame?root.requestAnimationFrame(refresh):setTimeout(refresh,0);}
             function resized(){clearTimeout(resizeTimer);resizeTimer=setTimeout(function(){if(!destroyed){layout();fitEpisodeGeometry();if(last && html[0].contains(last))focusNode(last);}},100);}
             $(root).on('resize.lamplay',resized);
             function controlTarget(id) { return filters.add(tools).find('[data-lp-control]').filter(function () {return $(this).attr('data-lp-control')===id;}).first(); }
@@ -1726,7 +1767,7 @@
             var resizeHandler=function(){if(inActivity()) syncBackground(resultsVisible?'results':view());fitStrip();};root.addEventListener('resize',resizeHandler);
             this.playerClosed=function () {if (release && !busy && !errorMessage) renderEpisodes(lastEpisodeKey);else renderHero();};
             var healthStartTimer=setTimeout(checkSources,1200);
-            this.destroy=function () {clearTimeout(healthStartTimer);healthPending=[];healthIo.clear();$(root).off('resize.lamplay',resized);clearTimeout(resizeTimer);html.find('.lp-scroll').each(function(){if(this._lpScrollFrame)root.cancelAnimationFrame(this._lpScrollFrame);});releaseBackground();vignette.remove();if(nativeBackground) nativeBackground.remove();root.removeEventListener('resize',resizeHandler);destroyed=true;if (activeScreen===self) activeScreen=null;changeGeneration();metadataIo.clear();html.remove();};
+            this.destroy=function () {clearTimeout(healthStartTimer);if(geometryFrame){if(root.cancelAnimationFrame)root.cancelAnimationFrame(geometryFrame);else clearTimeout(geometryFrame);}healthPending=[];healthIo.clear();$(root).off('resize.lamplay',resized);clearTimeout(resizeTimer);html.find('.lp-scroll').each(function(){if(this._lpScrollFrame)root.cancelAnimationFrame(this._lpScrollFrame);});releaseBackground();vignette.remove();if(nativeBackground) nativeBackground.remove();root.removeEventListener('resize',resizeHandler);destroyed=true;if (activeScreen===self) activeScreen=null;changeGeneration();metadataIo.clear();html.remove();};
         }
 
         $('<style id="lamplay-style"></style>').text([
@@ -2693,6 +2734,30 @@
             '.lamplay[data-view=results] .lp-title-slot{height:2.5em;width:65%;max-width:14em;align-self:flex-start;justify-content:flex-start}',
             '.lamplay[data-view=results] .lp-title-logo{width:auto;height:100%;max-height:100%;max-width:100%;object-fit:contain;object-position:left center}',
             '.player-panel .player-next.lp-next-action{pointer-events:auto;cursor:pointer}.player-panel .player-next.lp-next-action.focus{outline:2px solid currentColor;outline-offset:3px}'
+        ].join('\n')).appendTo('head');
+
+        $('<style id="lamplay-013-style"></style>').text([
+            '.lamplay:not([data-view=results]) .lp-panel{padding-bottom:0}.lamplay:not([data-view=results]) .lp-main{overflow:visible}',
+            '.lamplay:not([data-view=results]) .lp-strip,.lamplay:not([data-view=results]) .lp-tools{padding-right:.25em}',
+            '.lp-series[data-view=horizontal] .lp-body-pane,.lp-series[data-view=card] .lp-body-pane{padding-top:.65em;padding-bottom:.65em}',
+            '.lp-series[data-view=horizontal] .lp-episode-info>.lamplay__item-title,.lp-series[data-view=card] .lp-episode-info>.lamplay__item-title{height:auto;min-height:1.15em;max-height:2.3em;margin:0}',
+            '.lp-series[data-view=horizontal] .lp-description,.lp-series[data-view=card] .lp-description{height:3.9em;min-height:3.9em;max-height:3.9em;margin-top:.25em;-webkit-line-clamp:3;line-height:1.3}',
+            '.lamplay[data-view=card] .lp-top{gap:.25em}.lamplay[data-view=card] .lp-filters{gap:.25em}',
+            '.lp-series.lp-tight .lp-panel{padding-top:.65em;gap:.35em}.lp-series.lp-tight .lp-filters{gap:.35em}.lp-series.lp-tight .lp-body-pane{padding-top:.4em;padding-bottom:.4em}',
+            '.lp-series.lp-tight[data-view=card] .lp-hero-content{height:4em;gap:.2em}.lp-series.lp-tight[data-view=card] .lp-title-slot{height:2.3em}.lp-series.lp-tight[data-view=card] .lp-filters{font-size:.78em;gap:.25em}.lp-series.lp-tight[data-view=card] .lamplay__control{min-height:2.3em;padding:.35em .7em}.lp-series.lp-tight[data-view=card] .lp-caption{margin-bottom:.15em}',
+            '.lp-series.lp-tight .lp-panel{padding-top:.4em;gap:.25em}.lp-series.lp-tight .lp-body-pane{padding-top:.3em}.lp-series.lp-tight .lamplay__items{padding-top:0}.lp-series.lp-tight .lp-episode{padding-top:.4em}.lp-series.lp-tight .lp-episode-info{padding-top:.2em}',
+            '.lp-series[data-view=vertical] .lp-skeleton .lp-episode-info{max-height:6.3em;overflow:hidden}',
+            '.lp-series[data-view=horizontal] .lp-episode.lp-started:not(.focus):not(:focus) .lp-picture,.lp-series[data-view=card] .lp-episode.lp-started:not(.focus):not(:focus) .lp-picture{outline-offset:0}',
+            '.lp-series[data-view=vertical] .lp-episode{padding:0;border-width:0;overflow:visible;border-radius:.45em}',
+            '.lp-series[data-view=vertical] .lp-episode .lp-picture{height:auto;align-self:stretch;width:11.2em;min-width:11.2em;border-radius:.45em 0 0 .45em}',
+            '.lp-series[data-view=vertical] .lp-body-pane{padding-bottom:.65em}',
+            '.player-panel .player-next.lp-next-action{border-radius:1em;outline:0;outline-offset:0;box-shadow:none;overflow:hidden}',
+            '.player-panel .player-next.lp-next-action .player-next__episode{align-items:stretch}',
+            '.player-panel .player-next.lp-next-action .player-next__thumbnail{margin:0;flex:none;border-radius:1em;overflow:hidden}',
+            '.player-panel .player-next.lp-next-action .player-next__thumbnail-img{border-radius:0}',
+            '.player-panel .player-next.lp-next-action .player-next__body{margin:0;padding:.35em 1em;align-self:center}',
+            '.player-panel .player-next.lp-next-action.focus{outline:0;outline-offset:0;box-shadow:0 0 0 2px currentColor;background:rgba(255,255,255,.14)}',
+            '@media(max-width:600px){.lp-series[data-view=vertical] .lp-episode .lp-picture{width:30%;min-width:0}}'
         ].join('\n')).appendTo('head');
 
         var settingsObserver = null;
