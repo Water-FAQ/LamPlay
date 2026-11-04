@@ -8,9 +8,9 @@ if(size.width===1920){
 // Only the focused thumbnail scales; text coordinates stay fixed.
 await p.evaluate(()=>Lampa.Controller.collectionFocus(jQuery('.lp-tools .selector').first(),jQuery('.lamplay')));await p.waitForTimeout(200);
 let before=await p.locator('.lp-episode').nth(1).evaluate(n=>({pic:n.querySelector('.lp-picture').getBoundingClientRect().width,text:n.querySelector('.lp-episode-info').getBoundingClientRect().toJSON()}));
-await p.evaluate(()=>Lampa.Controller.collectionFocus(jQuery('.lp-episode').eq(1),jQuery('.lamplay')));await p.waitForTimeout(250);
+await p.evaluate(()=>Lampa.Controller.collectionFocus(jQuery('.lp-episode').eq(1),jQuery('.lamplay')));await p.waitForTimeout(340);
 let after=await p.locator('.lp-episode').nth(1).evaluate(n=>({pic:n.querySelector('.lp-picture').getBoundingClientRect().width,text:n.querySelector('.lp-episode-info').getBoundingClientRect().toJSON()}));assert.ok(after.pic>before.pic*1.03);assert.equal(before.text.y,after.text.y);assert.equal(before.text.height,after.text.height);checks++;
-await p.evaluate(()=>{mock.click('Вид:');mock.click('Вид:');Lampa.Controller.collectionFocus(jQuery('.lp-episode').eq(1),jQuery('.lamplay'))});await p.waitForTimeout(250);
+await p.evaluate(()=>{mock.click('Вид:');mock.click('Вид:');Lampa.Controller.collectionFocus(jQuery('.lp-episode').eq(1),jQuery('.lamplay'))});await p.waitForTimeout(340);
 let style=await p.locator('.lp-episode').nth(1).evaluate(n=>({bg:getComputedStyle(n).backgroundColor,outline:getComputedStyle(n).boxShadow,scale:getComputedStyle(n).transform}));assert.notEqual(style.bg,'rgb(255, 255, 255)');assert.ok(style.outline.includes('255, 255, 255'));assert.notEqual(style.scale,'none');checks++;
 let settings=await p.evaluate(()=>{let token=mock.params.lamplay_filmix_token,status=mock.params.lamplay_filmix_status;
 let root=jQuery('<div><div class="settings-param__name">Состояние входа</div></div>').appendTo('body');mock.parameter('rezka_auth_status').onRender(root);

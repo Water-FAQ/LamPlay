@@ -1,11 +1,11 @@
-/* LamPlay by WaterFAQ - 0.13.0 (experimental)
+/* LamPlay by WaterFAQ - 0.14.0 (experimental)
  * Independent Lampa plugin. Direct connections only; no proxy or remote code execution.
  * Providers: HDrezka, Kodik, AniLiberty, Filmix, CDNvideohub, KinoTochka, VeoVeo.
  */
 (function (root) {
     'use strict';
-    var VERSION = '0.13.0';
-    var RELEASE_DATE = '04.11.2026';
+    var VERSION = '0.14.0';
+    var RELEASE_DATE = '05.11.2026';
     var KEY = 'lamplay';
     var NAME = 'LamPlay';
     var PLAY = '<svg class="lp-play" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 3v18l15-9z"/></svg>';
@@ -458,7 +458,7 @@
                     var entries = labelledLinks(rezkaDecode(response.url), flag(settings('prefer_mp4', true), true));
                     entries.forEach(function (entry) { entry.url = fixRezkaStream(entry.url, settings); });
                     if (!entries.length) throw new Error('HDrezka: видеоссылки не распознаны.');
-                    done({ quality: qualities(entries), subtitles: labelledLinks(response.subtitle).map(function (entry) {
+                    done({ quality: qualities(entries), audio:response.audio || response.audio_tracks,languages:response.languages,dynamic_range:response.dynamic_range || response.hdr, subtitles: labelledLinks(response.subtitle).map(function (entry) {
                         return { label: entry.label, url: entry.url };
                     }) });
                 } catch (e) { fail(e); }
@@ -934,17 +934,30 @@
         return remaining?'Осталось '+Math.ceil(Math.max(0,duration-time)/60)+' мин.':
             'Просмотрено '+(time<60?Math.floor(time)+' сек.':Math.floor(time/60)+' мин.')+' из '+Math.ceil(duration/60)+' мин. · '+Math.round(+p.percent||time/duration*100)+'%';
     }
+    function movieDuration(seconds) {var m=Math.ceil(Math.max(0,+seconds||0)/60),h=Math.floor(m/60);return (h?h+' ч ':'')+(m%60 || !h?m%60+' мин.':'').trim();}
+    // One animation per pane, preserving current velocity when the remote changes its target.
+    function animatePane(pane,dest,horizontal) {
+        pane.style.scrollBehavior='auto';var state=pane._lpMotion,now=root.performance?root.performance.now():Date.now(),from=horizontal?pane.scrollLeft:pane.scrollTop;
+        var velocity=state&&state.horizontal===horizontal?state.velocity:0,delta=dest-from;
+        if(velocity*delta<0)velocity=0;velocity=Math.sign(delta)*Math.min(Math.abs(velocity),Math.abs(delta)*3/260);
+        if(pane._lpScrollFrame)root.cancelAnimationFrame(pane._lpScrollFrame);
+        state=pane._lpMotion={velocity:velocity,horizontal:horizontal};var duration=260;
+        function tick(time){var t=Math.min(1,Math.max(0,(time-now)/duration)),t2=t*t,t3=t2*t;
+            var pos=from+(3*t2-2*t3)*delta+(t3-2*t2+t)*duration*velocity;
+            state.velocity=((6*t-6*t2)*delta+(3*t2-4*t+1)*duration*velocity)/duration;
+            if(horizontal)pane.scrollLeft=pos;else pane.scrollTop=pos;
+            if(t<1)pane._lpScrollFrame=root.requestAnimationFrame(tick);else{pane._lpScrollFrame=null;state.velocity=0;}
+        }
+        if(root.requestAnimationFrame)pane._lpScrollFrame=root.requestAnimationFrame(tick);else if(horizontal)pane.scrollLeft=dest;else pane.scrollTop=dest;
+    }
     function keepVisible(pane,target) {
         if (!pane || !target || !pane.contains(target)) return;
         var box=pane.getBoundingClientRect(),rect=target.getBoundingClientRect(),gap=8;
-        if (pane.classList.contains('lp-strip') || pane.classList.contains('lp-tools') && pane.closest('.lamplay').getAttribute('data-view')!=='vertical' || pane.classList.contains('lp-body-pane') && target.classList.contains('lp-episode')) {
-            var horizontal=!pane.classList.contains('lp-body-pane') || pane.closest('.lamplay').getAttribute('data-view')!=='vertical';
+        if (pane.classList.contains('lp-strip') || pane.classList.contains('lp-tools') && !pane.closest('.lamplay').classList.contains('lp-columns') || pane.classList.contains('lp-body-pane') && target.classList.contains('lp-episode')) {
+            var horizontal=!pane.classList.contains('lp-body-pane') || !pane.closest('.lamplay').classList.contains('lp-columns');
             var dest=horizontal?pane.scrollLeft+rect.left-box.left+(rect.width-pane.clientWidth)/2:pane.scrollTop+rect.top-box.top+(rect.height-pane.clientHeight)/2;
             dest=Math.max(0,Math.min(dest,horizontal?pane.scrollWidth-pane.clientWidth:pane.scrollHeight-pane.clientHeight));
-            if (pane._lpScrollFrame) root.cancelAnimationFrame(pane._lpScrollFrame);
-            var from=horizontal?pane.scrollLeft:pane.scrollTop,started=null;
-            function tick(now){if(started===null)started=now;var t=Math.min(1,(now-started)/180),pos=from+(dest-from)*(1-Math.pow(1-t,3));if(horizontal)pane.scrollLeft=pos;else pane.scrollTop=pos;if(t<1)pane._lpScrollFrame=root.requestAnimationFrame(tick);else pane._lpScrollFrame=null;}
-            if(root.requestAnimationFrame)pane._lpScrollFrame=root.requestAnimationFrame(tick);else if(horizontal)pane.scrollLeft=dest;else pane.scrollTop=dest;
+            animatePane(pane,dest,horizontal);
             return;
         }
         if (pane.scrollHeight>pane.clientHeight && !(pane.classList.contains('lp-body-pane') && pane.closest('.lamplay') && /^(horizontal|card)$/.test(pane.closest('.lamplay').getAttribute('data-view')))) {
@@ -1129,6 +1142,7 @@
             var cache = {}, probeQueue = [], probing = 0, observed = null, metadata = { details: movie, seasons: {}, id: null, request: 0, signature: '' };
             var type = /^(tv|movie)$/.test(movie.media_type) ? movie.media_type : movie.name || movie.first_air_date ? 'tv' : 'movie';
             var html = $('<div class="lamplay lp-scroll"></div>'), backdrop = $('<div class="lp-backdrop"></div>');
+            var loader=$('<div class="lp-loader" role="progressbar" aria-label="Загрузка"><i></i></div>');
             var top = $('<div class="lp-top"></div>');
             var panel = $('<div class="lp-panel"></div>'), side = $('<aside class="lp-side"></aside>');
             var hero = $('<div class="lp-hero"></div>'), main = $('<main class="lp-main"></main>');
@@ -1139,11 +1153,14 @@
             status.append(statusText);side.append(hero);main.append(filters,bodyPane.append(body));panel.append(side,main);
             html.append(backdrop,status,panel);
             function inActivity() { var a = Lampa.Activity.active(); return !destroyed && a && a.activity === self.activity; }
+            function listLayout(){return view()==='vertical' || !series() && view()==='card';}
+            function chooseSeason(value){if(String(value)===String(season))return;season=String(value);loadEpisodes();}
+            function chooseVoice(value){if(voice && String(value.id)===String(voice.id))return;voice=value;loadEpisodes();}
             function savedResume() { return object(setting('resume', {}))[key]; }
             function series() { return release && typeof release.series === 'boolean' ? release.series : type === 'tv'; }
             function view() { var v = setting(series() ? 'view_series' : 'view_movie', series() ? 'horizontal' : 'vertical'); return ['horizontal','vertical','card'].indexOf(v) < 0 || !series() && v === 'horizontal' ? 'vertical' : v; }
             function focusNode(node) {
-                node = $(node);if(node.hasClass('lp-result'))lastResult=node[0];if(resultsVisible && node.attr('data-lp-control'))resultFilter=node.attr('data-lp-control');if(node.hasClass('lp-episode'))fitEpisodeGeometry();last = node[0];lastControl=node.attr('data-lp-control') || '';if(lastControl) returnFilter=lastControl;if (last && last._lpEpisodeKey) lastEpisodeKey=last._lpEpisodeKey;
+                node = $(node);if(node.hasClass('lp-result'))lastResult=node[0];if(resultsVisible && node.attr('data-lp-control'))resultFilter=node.attr('data-lp-control');last = node[0];lastControl=node.attr('data-lp-control') || '';if(lastControl) returnFilter=lastControl;if (last && last._lpEpisodeKey) lastEpisodeKey=last._lpEpisodeKey;
                 node.parents('.lp-scroll').each(function () { keepVisible(this,node[0]); });
                 if (node[0] && node[0]._lpProbe) enqueueProbe(node[0]._lpProbe);
             }
@@ -1197,18 +1214,18 @@
                 status.find('.lp-retry').remove();
                 if (error && retryAction) status.append(interactive($('<span class="lp-retry">Повторить попытку</span>'),function () { retryAction(); }));
             }
-            function begin(message,retry) { changeGeneration();busy=true;retryAction=retry;setStatus(message);refreshControls();
+            function begin(message,retry) { changeGeneration();busy=true;html.addClass('lp-loading').attr('aria-busy','true');retryAction=retry;setStatus(message);if(!release)refreshControls();
                 if(!body.children().length && !resultsVisible){for(var sk=0;sk<6;sk++)body.append('<div class="lamplay__item lp-episode lp-skeleton" aria-hidden="true"><div class="lp-picture"></div><div class="lp-episode-info"><div class="lp-skeleton-line"></div><div class="lp-skeleton-line"></div><div class="lp-skeleton-line"></div></div></div>');}fitEpisodeGeometry();self.start(); }
-            function finish() { busy=false;setStatus('');refreshControls(); }
-            function failed(e) { if (destroyed) return;busy=false;setStatus(safeError(e),true);refreshControls();var retry=status.find('.lp-retry');if(retry.length)last=retry[0];self.start(); }
-            function cancel() { changeGeneration();busy=false;setStatus('Загрузка отменена. Измените поиск или источник.');refreshControls();self.start(); }
+            function finish() { busy=false;html.removeClass('lp-loading').attr('aria-busy','false');setStatus(''); }
+            function failed(e) { if (destroyed) return;busy=false;html.removeClass('lp-loading').attr('aria-busy','false');setStatus(safeError(e),true);refreshControls();var retry=status.find('.lp-retry');if(retry.length)last=retry[0];self.start(); }
+            function cancel() { changeGeneration();busy=false;html.removeClass('lp-loading').attr('aria-busy','false');setStatus('Загрузка отменена. Измените поиск или источник.');refreshControls();self.start(); }
             function layout() {
                 var v = resultsVisible ? 'results' : view();
-                html.attr('data-view',v).toggleClass('lp-series',!resultsVisible && series()).toggleClass('lp-film',!resultsVisible && !series());
-                if (v === 'card' || !resultsVisible && series() && v === 'horizontal') {
-                    side.detach();main.detach();filters.append(tools);top.append(hero,filters);panel.append(top,bodyPane);
+                html.toggleClass('lp-columns',v==='vertical' || v==='results' || !series() && v==='card');html.attr('data-view',v).toggleClass('lp-series',!resultsVisible && series()).toggleClass('lp-film',!resultsVisible && !series());
+                if (!resultsVisible && series() && (v === 'card' || v === 'horizontal')) {
+                    side.detach();main.detach();filters.append(tools);top.append(hero,filters);panel.append(top,loader,bodyPane);
                 } else {
-                    top.detach();side.append(hero,tools);main.append(filters,bodyPane);panel.append(side,main);
+                    top.detach();side.append(hero,tools);main.append(filters,loader,bodyPane);panel.append(side,main);
                 }
                 syncBackground(v);
                 fitStrip();
@@ -1224,9 +1241,9 @@
                     if(url) nativeBackground=setImage($('<img class="full-start__background loaded lp-native-background" alt="">'),url).css({position:'fixed',transition:'none',zIndex:0});
                 }
                 if(nativeBackground) {nativeBackground.off('load.lpVignette').on('load.lpVignette',function(){if(!destroyed)syncBackground(resultsVisible?'results':view());});if(!nativeBackground.parent().length) $('body').prepend(nativeBackground);nativeBackground.css('display',sharp?'block':'none');}
-                if(sharp){if(!vignette.parent().length) $('body').prepend(vignette);if(nativeBackground){vignette.insertAfter(nativeBackground);var bgRect=nativeBackground[0].getBoundingClientRect();vignette.find('.lp-vignette-edge').css({left:bgRect.left+'px',width:bgRect.width+'px'});var fadeTop=Math.max(0,bgRect.top+bgRect.height*.38),fadeEnd=Math.max(1,bgRect.bottom-fadeTop);vignette.find('.lp-vignette-bottom').css({top:fadeTop+'px',background:'linear-gradient(to bottom,transparent 0px,rgba(0,0,0,.55) '+(fadeEnd*.65)+'px,#000 '+fadeEnd+'px,#000 100%)'});}}else vignette.detach();
+                if(sharp){if(!vignette.parent().length) $('body').prepend(vignette);if(nativeBackground){vignette.insertAfter(nativeBackground);var bgRect=nativeBackground[0].getBoundingClientRect();vignette.find('.lp-vignette-edge').css({left:bgRect.left+'px',width:bgRect.width+'px'});var fadeTop=Math.max(0,bgRect.top+bgRect.height*.38),fadeEnd=Math.max(1,bgRect.bottom-fadeTop);vignette.find('.lp-vignette-bottom').css({top:fadeTop+'px',background:'linear-gradient(to bottom,transparent,rgba(0,0,0,.28))'});}}else vignette.detach();
                 var bg=Lampa.Utils && Lampa.Utils.cardImgBackground ? Lampa.Utils.cardImgBackground(movie) : imageURL(movie.poster_path || movie.backdrop_path,'w200');
-                if(v!=='card') bg=imageURL(metadata.details.backdrop_path || metadata.details.poster_path,'w200');
+                bg=imageURL(metadata.details.backdrop_path || metadata.details.poster_path,'w200') || bg;
                 if (bg && bg!==lastBackground && Lampa.Background && Lampa.Background.change) {Lampa.Background.change(bg);lastBackground=bg;}
             }
             function releaseBackground() { lastBackground='';$('body').removeClass('lp-active lp-card-background');if(nativeBackground) nativeBackground.detach();vignette.detach(); }
@@ -1248,9 +1265,9 @@
                 var sideways=series() && (v==='horizontal' || v==='card');
                 bodyPane.css({'margin-left':'',width:'','padding-left':'','padding-right':''});
                 html.find('.lp-strip,.lp-tools').each(function(){
-                    var row=$(this),across=row.hasClass('lp-strip') || v!=='vertical';
+                    var row=$(this),across=row.hasClass('lp-strip') || !listLayout();
                     row.css({width:'','max-width':''});
-                    if(across){var box=this.getBoundingClientRect();row.css({width:Math.max(0,bounds.right-box.left)+'px','max-width':'none'});edgeFade(this,true);row.off('scroll.lpEdges').on('scroll.lpEdges',function(){edgeFade(this,true);});}
+                    if(across){var box=this.getBoundingClientRect();row.css({width:Math.max(0,(listLayout()?bodyPane[0].getBoundingClientRect().right-parseFloat(root.getComputedStyle(bodyPane[0]).paddingRight):bounds.right)-box.left)+'px','max-width':'none'});edgeFade(this,true);row.off('scroll.lpEdges').on('scroll.lpEdges',function(){edgeFade(this,true);});}
                     else row.css({'mask-image':'none','-webkit-mask-image':'none'}).off('scroll.lpEdges');
                 });
                 if(sideways){
@@ -1258,7 +1275,7 @@
                     bodyPane.css({'margin-left':-left+'px',width:bounds.width+'px','padding-left':Math.max(0,left+parseFloat(style.paddingLeft))+'px','padding-right':Math.max(0,right+parseFloat(style.paddingRight))+'px'});
                 }
                 if(sideways){var rowHeight=body[0].getBoundingClientRect().height,style=root.getComputedStyle(bodyPane[0]),required=rowHeight+parseFloat(style.paddingTop)+parseFloat(style.paddingBottom)+8;html.toggleClass('lp-tight',required>bodyPane[0].clientHeight);}
-                html.find('.lp-strip,.lp-tools').each(function(){if($(this).hasClass('lp-strip') || v!=='vertical')edgeFade(this,true);});
+                html.find('.lp-strip,.lp-tools').each(function(){if($(this).hasClass('lp-strip') || !listLayout())edgeFade(this,true);});
                 if(release && series() && !errorMessage){edgeFade(bodyPane[0],sideways);bodyPane.off('scroll.lpEdges').on('scroll.lpEdges',function(){edgeFade(this,sideways);});}
                 else bodyPane.css({'mask-image':'none','-webkit-mask-image':'none'}).off('scroll.lpEdges');
                 geometryRunning=false;
@@ -1309,9 +1326,9 @@
                 if (release && series()) {
                     var seasons = seasonList();
                     var seasonStrip = $('<div class="lp-strip-group"><div class="lp-caption">Сезоны</div><div class="lp-scroll lp-strip"></div></div>');
-                    seasons.forEach(function (s) {control('Сезон '+s,function () {season=String(s);loadEpisodes();},seasonStrip.find('.lp-strip'),String(s)===String(season));});
+                    seasons.forEach(function (s) {control('Сезон '+s,function () {chooseSeason(s);},seasonStrip.find('.lp-strip'),String(s)===String(season));});
                     var voicesStrip = $('<div class="lp-strip-group"><div class="lp-caption">Перевод</div><div class="lp-scroll lp-strip"></div></div>');
-                    release.voices.forEach(function (v) {control(v.title,function () {voice=v;loadEpisodes();},voicesStrip.find('.lp-strip'),String(v.id)===String(voice.id));});
+                    release.voices.forEach(function (v) {control(v.title,function () {chooseVoice(v);},voicesStrip.find('.lp-strip'),String(v.id)===String(voice.id));});
                     filters.append(seasonStrip,voicesStrip);
                 } else if (busy && !resultsVisible && series()) {
                     ['Сезоны','Перевод'].forEach(function(label){filters.append($('<div class="lp-strip-group lp-loading-group"><div class="lp-caption"></div><div class="lp-strip"><div class="lamplay__control">Загрузка</div></div></div>').find('.lp-caption').text(label).end());});
@@ -1324,7 +1341,7 @@
                     save(series()?'view_series':'view_movie',next);lastControl='view';if(errorMessage){refreshControls();renderHero();self.start();}else if(release)renderEpisodes(lastEpisodeKey);else{refreshControls();renderHero();self.start();}
                 });
                 control('Сбросить фильтр',function () {query=initialQuery;pendingResume=null;search();});
-                control(query,searchMenu).wrapInner('<span class="lp-control-value"></span>').attr({'aria-label':'Поиск: '+query,'data-lp-control':'search'}).addClass('lp-search').prepend('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/></svg>');
+                control(query,searchMenu).empty().text(query).wrapInner('<span class="lp-control-value"></span>').attr({'aria-label':'Поиск: '+query,'data-lp-control':'search'}).addClass('lp-search').prepend('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/></svg>');
                 if (release) control('К результатам',backToResults);
                 if (busy) control('Отменить',cancel);
                 layout();if(restoreControl) {var restored=controlTarget(restoreControl);if(restored.length) last=restored[0];}
@@ -1501,8 +1518,15 @@
                         info.append($('<div class="lp-resume-detail"></div>').text([resume.sourceTitle,resume.voice.title].filter(function(v,i,a){return v && a.indexOf(v)===i;}).join(' · ')));
 
                     } else info.append($('<div class="lp-resume-detail"></div>').text([source.title,voice && voice.title].filter(function(v,i,a){return v && a.indexOf(v)===i;}).join(' · ')));
-                } else info.append($('<div class="lp-resume-detail"></div>').text('Выберите '+(release && !series()?'озвучку':'серию')+' для просмотра'));
-                content.append(row.append(info));hero.append(content);
+                } else info.append($('<div class="lp-resume-detail"></div>').text('Выберите '+(!series()?'озвучку':'серию')+' для просмотра'));
+                row.append(info);
+                if(!resultsVisible && !series() && row.find('.lp-continue').length){
+                    var action=row.find('.lp-continue'),label=action.attr('aria-label') || action.text();
+                    action.find('span').remove();action.attr('aria-label',label);
+                    action.append(info);row.empty().append(action);
+                    if(resume && resume.duration){var track=$('<div class="lp-progress lp-resume-progress"><i></i></div>');track.find('i').css('width',Math.min(100,+resume.percent || resume.time/resume.duration*100)+'%');content.append(row,track);}else content.append(row);
+                }else content.append(row);
+                hero.append(content);
                 if(onContinue) last=hero.find('.lp-continue')[0];
             }
             function resumePlay() {
@@ -1542,19 +1566,24 @@
                     var line=$('<div class="lp-progress"><i></i></div>');line.find('i').css('width',Math.max(0,Math.min(100,+p.percent||0))+'%');picture.append(line);
                     var info=$('<div class="lp-episode-info"></div>');
                     info.append($('<div class="lamplay__item-title"></div>').text(series()?episodeName(ep):v.title));
-                    if(view()==='vertical') {
-                        info.prepend($('<span class="lp-row-duration"></span>').text(duration?Math.ceil(duration/60)+' мин.':''));
+                    if(listLayout()) {
+                        info.prepend($('<span class="lp-row-duration"></span>').text(duration?(series()?Math.ceil(duration/60)+' мин.':movieDuration(duration)):''));
                         info.append(line.clone());
                         info.append($('<div class="lp-watched"></div>').text(p.time?progressText(Object.assign({},p,{duration:duration}),false):' '));
                     }
                     var details=[];if (series() && +m.vote_average>0) details.push('★ '+Number(m.vote_average).toFixed(1));
                     if (m.air_date || m.release_date) details.push(formatDate(m.air_date || m.release_date));
-                    if (!series() && duration) details.push(Math.ceil(duration/60)+' мин.');
                     var meta=$('<div class="lamplay__item-detail lp-episode-meta"></div>').append($('<span></span>').text(series()?(+m.vote_average>0?'★ '+Number(m.vote_average).toFixed(1):''):details[0] || ''));
                     var qualityMeta=$('<span class="lp-quality-meta"></span>');meta.append(qualityMeta,$('<span class="lp-air-date"></span>').text(series()?formatDate(m.air_date || m.release_date):details.slice(1).join(' · ')));
-                    if(view()==='vertical') {if(meta.children().first().text() && meta.find('.lp-air-date').text())meta.children().first().after('<span class="lp-meta-separator">•</span>');info.append(meta);}else info.prepend(meta);
+                    if(listLayout()) {if(meta.children().first().text() && meta.find('.lp-air-date').text())meta.children().first().after('<span class="lp-meta-separator">•</span>');info.append(meta);}else info.prepend(meta);
                     var desc=series()?(m.overview || ep.description):m.tagline;
                     if (series() || desc) info.append($('<div class="lp-description"></div>').text(desc || ''));
+                    if(!series()){
+                        var date=formatDate(m.release_date),tag=m.tagline || '';
+                        info.find('.lp-episode-meta,.lp-description').remove();
+                        info.append($('<div class="lp-film-footer"></div>').append($('<div class="lp-film-caption"></div>').text([date,tag].filter(Boolean).join(' · ')),$('<div class="lp-stream-info"></div>')));
+                        picture.hide();
+                    }
                     node.append(picture,info);body.append(node);
                     if(ep.unavailable){
                         var futureNotice=availability(m.air_date),notice=futureNotice || 'Недоступна в данной озвучке';if(futureNotice){info.find('.lp-row-duration').remove();meta.children().first().empty();meta.find('.lp-meta-separator').remove();}
@@ -1563,7 +1592,7 @@
                         picture.append($('<span class="lp-unavailable-number"></span>').text(('0'+ep.number).slice(-Math.max(2,String(ep.number).length))));
                         info.find('.lp-watched,.lp-quality-meta,.lp-description').remove();info.find('.lp-progress i').css('width','0%');info.find('.lamplay__item-title').text(m.name || 'Эпизод '+ep.number);
                         var availabilityNode=$('<div class="lp-availability"></div>').text(notice);
-                        if(view()==='vertical')meta.append(availabilityNode);else {
+                        if(listLayout())meta.append(availabilityNode);else {
                             var heading=$('<div class="lp-unavailable-heading"></div>');
                             heading.append(info.find('.lamplay__item-title'),meta.find('.lp-air-date'));meta.remove();info.prepend(heading);info.append(availabilityNode);
                         }
@@ -1581,7 +1610,17 @@
             }
             function showQuality(task,streams) {
                 if (!task.node[0].isConnected || task.ticket!==generation) return;
-                var q=maxQuality(streams.quality);task.badge.text(q).toggle(!!q);if(task.qualityMeta) task.qualityMeta.text(q).toggle(!!q);
+                var q=maxQuality(streams.quality);
+                if(!series()){
+                    var langs=[],range='',audio=streams.audio || streams.audio_tracks || [],languages=streams.languages || [];
+                    if(Array.isArray(languages))languages.forEach(function(l){if(typeof l==='string' && /^[a-z]{2,3}$/i.test(l))langs.push(l.toUpperCase());});
+                    if(Array.isArray(audio))audio.forEach(function(a){var l=a && (a.language || a.lang);if(typeof l==='string' && /^[a-z]{2,3}$/i.test(l))langs.push(l.toUpperCase());});
+                    langs=langs.filter(function(l,i,a){return a.indexOf(l)===i;});
+                    var value=String(streams.dynamic_range || streams.hdr || '').toUpperCase();
+                    if(/^(HDR|HDR10|HDR10\+|SDR|HLG|DOLBY VISION)$/.test(value))range=value;
+                    task.node.find('.lp-stream-info').text([langs.join(', '),range,q].filter(Boolean).join(' · '));
+                }
+                task.badge.text(q).toggle(!!q);if(task.qualityMeta) task.qualityMeta.text(q).toggle(!!q);
             }
             function enqueueProbe(task) {
                 if (destroyed || busy || task.ticket!==generation) return;
@@ -1709,8 +1748,8 @@
                         if(entry.kind==='source'){sourceMenu(show);return;}
                         Lampa.Select.show({title:entry.title,items:entry.items,onBack:show,onSelect:function(item){
                             close();if(entry.kind==='source'){source=providers.filter(function(p){return p.id===item.value;})[0];saveSource(movie,source.id);pendingResume=null;search();}
-                            else if(entry.kind==='season'){season=String(item.value);loadEpisodes();}
-                            else{voice=release.voices.filter(function(v){return String(v.id)===String(item.value);})[0];loadEpisodes();}
+                            else if(entry.kind==='season'){chooseSeason(item.value);}
+                            else{chooseVoice(release.voices.filter(function(v){return String(v.id)===String(item.value);})[0]);}
                         }});
                     }});
                 }show();
@@ -1733,8 +1772,8 @@
                         if(dir==='up' || dir==='down'){var index=controls.index(current),next=controls[index+(dir==='up'?-1:1)];if(next)focus(next);else if(dir==='up')Lampa.Controller.toggle('head');return;}
                     }
                 }
-                if(errorMessage && filter && dir==='right' && (view()==='vertical' || resultsVisible)){focus(status.find('.lp-retry')[0]);return;}
-                if(filter && (parent.hasClass('lp-strip') || parent[0]===tools[0] && view()!=='vertical') && (dir==='left' || dir==='right')){
+                if(errorMessage && filter && dir==='right' && (listLayout() || resultsVisible)){focus(status.find('.lp-retry')[0]);return;}
+                if(filter && (parent.hasClass('lp-strip') || parent[0]===tools[0] && !listLayout()) && (dir==='left' || dir==='right')){
                     var sibling=dir==='right'?current.nextAll('.selector').first():current.prevAll('.selector').first();
                     if(sibling.length){focus(sibling[0]);return;}
                 }
@@ -1744,10 +1783,10 @@
                     if(!focus(nearest(html.find('.selector').not('.lp-retry'),dir) || exit))Lampa.Controller.toggle('head');
                     return;
                 }
-                if(filter && parent[0]===tools[0] && dir==='down' && view()!=='vertical'){
+                if(filter && parent[0]===tools[0] && dir==='down' && !listLayout()){
                     var candidates=retry.length?retry:body.find('.lp-episode');if(focus(nearest(candidates,'down')))return;
                 }
-                if(filter && parent[0]===tools[0] && view()==='vertical' && dir==='right' && (retry.length || body.find('.lp-episode').length)){
+                if(filter && parent[0]===tools[0] && listLayout() && dir==='right' && (retry.length || body.find('.lp-episode').length)){
                     if(focus(nearest(retry.length?retry:body.find('.lp-episode'),'right')))return;
                 }
                 if((filter || current.hasClass('lp-continue')) && dir==='up'){
@@ -1756,7 +1795,7 @@
                 if(errorMessage && filter && dir==='down'){
                     if(!focus(nearest(tools.find('.selector'),'down')))focus(nearest(retry,'down'));return;
                 }
-                if(dir==='right' && (current.hasClass('lp-episode') && (view()==='vertical' || current[0]===body.children('.lp-episode').last()[0]) || filter && parent.children('.selector').last()[0]===current[0] && (parent.hasClass('lp-strip') || parent[0]===tools[0] && view()!=='vertical'))) return filterDrawer();
+                if(dir==='right' && (current.hasClass('lp-episode') && (listLayout() || current[0]===body.children('.lp-episode').last()[0]) || filter && parent.children('.selector').last()[0]===current[0] && (parent.hasClass('lp-strip') || parent[0]===tools[0] && !listLayout()))) return filterDrawer();
                 var resume=hero.find('.lp-continue');
                 if(dir==='left' && filter && first && resume.length) {returnFilter=filter;Lampa.Controller.collectionFocus(resume,html);return;}
                 if(dir==='right' && current.hasClass('lp-continue')) {var next=controlTarget(returnFilter);if(!next.length) next=filters.find('.selector').first();if(next.length) {Lampa.Controller.collectionFocus(next,html);return;}}
@@ -2760,6 +2799,9 @@
             '@media(max-width:600px){.lp-series[data-view=vertical] .lp-episode .lp-picture{width:30%;min-width:0}}'
         ].join('\n')).appendTo('head');
 
+        $('<style id="lamplay-014-style"></style>').text(".lp-scroll{scroll-behavior:auto}\n.lp-picture,.lp-series[data-view=vertical] .lp-episode{transition:transform .26s cubic-bezier(.4,0,.2,1)}\n.lp-loader{height:3px;min-height:3px;position:relative;overflow:hidden;flex:none;opacity:0;pointer-events:none}\n.lp-loader i{display:block;position:absolute;width:26%;height:100%;background:rgba(255,255,255,.8);border-radius:2px}\n.lp-loading .lp-loader{opacity:1}.lp-loading .lp-loader i{animation:lp-loading-run 1.6s ease-in-out infinite}\n@keyframes lp-loading-run{0%{left:-28%}100%{left:102%}}\n.lamplay .lamplay__status.lp-busy{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);background:none}\n.lp-skeleton .lp-picture,.lp-skeleton-line,.lp-loading-group .lamplay__control{position:relative;overflow:hidden}\n.lp-skeleton .lp-picture:before,.lp-skeleton-line:before,.lp-loading-group .lamplay__control:before{content:'';position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,rgba(255,255,255,.15),transparent);animation:lp-shimmer 1.8s ease-in-out infinite}\n@keyframes lp-shimmer{to{transform:translateX(100%)}}\n.lp-episode:not(.lp-skeleton){animation:lp-ready .16s ease-out}\n@keyframes lp-ready{from{opacity:.35}to{opacity:1}}\n.lp-search .lp-control-value{flex:1;white-space:nowrap;overflow:hidden;min-width:0;display:block;padding-right:.2em}\n.lamplay .lp-hero .lp-title-slot{width:100%;max-width:100%;justify-content:center}\n.lamplay:not([data-view=card]):not([data-view=results]) .lp-hero .lp-title-logo{transform:scale(.7);transform-origin:center;object-position:center}\n.lamplay.lp-film[data-view=card] .lp-panel{flex-direction:row}\n.lamplay.lp-film[data-view=card] .lp-side,.lamplay.lp-film[data-view=card] .lp-main{display:flex}\n.lamplay.lp-film[data-view=card] .lp-side{width:34%;flex:none;padding:0}\n.lamplay.lp-film[data-view=card] .lp-main{flex:1;min-height:0;min-width:0}\n.lamplay.lp-film[data-view=card] .lp-tools{flex-direction:column}\n.lamplay.lp-film[data-view=card] .lp-tools>.lamplay__control{height:2.8em;min-height:2.8em;padding:.4em .8em}\n.lamplay.lp-film[data-view=card] .lp-hero{width:100%;aspect-ratio:16/9;height:auto;min-height:0;max-height:none;flex:none;background:none}\n.lamplay.lp-film[data-view=card] .lp-hero-content{position:absolute;height:100%;padding:.8em;justify-content:flex-end;gap:.4em}\n.lamplay.lp-film[data-view=card] .lp-title-slot{height:2.5em;width:100%;max-width:100%}\n.lamplay.lp-film[data-view=card] .lp-title-logo{max-height:100%;max-width:70%;object-position:center}\n.lamplay.lp-film[data-view=card] .lp-resume-row{font-size:.9em;gap:.6em;flex-direction:row}\n.lamplay.lp-film .lp-continue{border:0;border-radius:.4em;background:transparent;padding:.35em .25em;min-height:2.65em;width:100%;align-items:center;text-align:left;gap:.65em}\n.lamplay.lp-film .lp-continue.focus{background:rgba(255,255,255,.12);color:white;box-shadow:0 0 0 2px rgba(255,255,255,.75)}\n.lamplay.lp-film .lp-continue .lp-play{width:1.05em;height:1.05em;flex:none}\n.lamplay.lp-film .lp-resume-info{flex:1;max-width:none;font-size:.9em}\n.lamplay.lp-film .lp-resume-progress{width:100%;flex:none}\n.lamplay.lp-film .lp-episode>.lp-picture{display:none!important}\n.lamplay.lp-film .lp-episode{padding:.7em .85em;gap:0;min-height:5.9em;position:relative;border:0;outline:none;overflow:hidden;background:rgba(0,0,0,.35)}\n.lamplay.lp-film .lp-episode.focus,.lamplay.lp-film .lp-episode:focus{background:rgba(255,255,255,.15);color:white;box-shadow:inset 0 0 0 2px rgba(255,255,255,.75)}\n.lamplay.lp-film .lp-episode-info{padding:0;display:flex;flex-direction:column;gap:.28em;position:relative;min-height:4.5em;width:100%}\n.lamplay.lp-film .lp-episode-info>.lamplay__item-title{padding-right:6.5em;line-height:1.2;min-height:1.2em;max-height:2.4em}\n.lamplay.lp-film .lp-row-duration{position:absolute;right:0;top:0;font-size:.8em;line-height:1.5;float:none}\n.lamplay.lp-film .lp-episode-info>.lp-progress{position:static;display:block;width:100%;flex:none;margin:.12em 0 0;background:rgba(255,255,255,.28);height:.22em;min-height:3px}\n.lamplay.lp-film .lp-episode-info>.lp-progress i{background:rgba(255,255,255,.9)}\n.lamplay.lp-film .lp-watched{margin:0;font-size:.76em;line-height:1.3;color:rgba(255,255,255,.8)}\n.lp-film-caption{font-size:.78em;line-height:1.3;margin:0;color:rgba(255,255,255,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.lp-stream-info{font-size:.76em;line-height:1.3;min-height:1.3em;text-align:right;margin-top:0;flex:none;font-weight:600}\n.lamplay.lp-film .lp-skeleton .lp-episode-info{height:4.5em;min-height:4.5em;gap:.28em;justify-content:flex-start}\n.lamplay.lp-film .lp-skeleton-line{margin:.15em 0}\nbody.lp-card-background .lp-vignette{opacity:.32}\nbody.lp-card-background .lp-vignette-edge{background:linear-gradient(90deg,rgba(0,0,0,.35),transparent 30%,transparent 80%,rgba(0,0,0,.15))}\nbody.lp-card-background .lp-vignette-bottom{background:linear-gradient(transparent,rgba(0,0,0,.28))}\nbody.lp-card-background .lp-native-background{filter:brightness(.85)!important;mask-image:radial-gradient(ellipse at 62% 35%,#000 15%,rgba(0,0,0,.8) 45%,transparent 90%)!important;-webkit-mask-image:radial-gradient(ellipse at 62% 35%,#000 15%,rgba(0,0,0,.8) 45%,transparent 90%)!important}\n@media(max-width:600px){.lamplay.lp-film[data-view=card] .lp-side{width:100%}.lamplay.lp-film[data-view=card] .lp-main{flex:none;width:100%}.lamplay.lp-film[data-view=card] .lp-tools{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.lamplay.lp-film[data-view=card] .lp-hero{min-height:0}.lamplay.lp-film .lp-episode{padding:.65em}}\n@media(prefers-reduced-motion:reduce){.lp-loading .lp-loader i,.lp-skeleton .lp-picture:before,.lp-skeleton-line:before,.lp-episode{animation:none}.lp-picture,.lp-episode{transition:none}}\n").appendTo('head');
+
+        $('<style></style>').text('.lp-series.lp-tight[data-view=card] .lp-panel{gap:.1em;padding-top:.25em}.lp-film-footer{display:flex;gap:.7em;align-items:center;margin-top:auto;min-width:0}.lp-film-caption{min-width:0;flex:1}.lamplay.lp-film .lp-resume-row{min-height:2.9em}').appendTo('head');
         var settingsObserver = null;
         function arrangeSettings(body) {
             childMenus.forEach(function (id) {

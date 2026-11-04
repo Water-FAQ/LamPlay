@@ -248,7 +248,7 @@ async function feature040Tests(){
     h.w.document.dispatchEvent(new h.w.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));h.L.Controller.collectionFocus(other,full);await settle();
     test('Initial focus priority stops after user navigation',()=>assert.equal(other.hasClass('focus'),true));h.close();
     h=harness();h.m.aliasMovie();h.m.open(true);await settle();
-    test('Compound provider film titles retain TMDB poster, runtime and tagline',()=>{assert.ok(h.$('.lp-cover').attr('src'));assert.match(h.$('.lp-description').first().text(),/Иногда/);assert.match(h.$('.lamplay__item-detail').first().text(),/113 мин/);assert.ok(!h.m.calls.some(r=>r.url.includes('search/movie')));});h.close();
+    test('Compound provider film titles retain TMDB poster, runtime and tagline',()=>{assert.ok(h.$('.lp-cover').attr('src'));assert.match(h.$('.lp-film-caption').first().text(),/Иногда/);assert.match(h.$('.lp-row-duration').first().text(),/1 ч 53 мин/);assert.ok(!h.m.calls.some(r=>r.url.includes('search/movie')));});h.close();
     h=harness();h.m.open();await settle();const previous=h.m.selection;
     test('Series view cycles without opening a side menu',()=>{for(const v of ['vertical','card','horizontal']){h.m.click('Вид:');assert.equal(h.$('.lamplay').attr('data-view'),v);assert.equal(h.m.selection,previous);}});
     h.$('body').append('<div class="player-panel"><div class="player-next__title"></div><div class="player-next__episode-title"></div></div>');h.m.click('В дороге');await settle();
