@@ -83,7 +83,7 @@ test('Kodik rotated base64 stream decode preserves direct HTTPS', () => {
 });
 test('Source challenge pages produce explicit error', () => assert.throws(()=>C.parseRezkaSearch('Just a moment cf-chl-test','https://rezka.test'),/защиты/));
 test('Independent implementation contains no proxy endpoints, eval or remote code loading', () => {
-    assert.ok(!/\beval\s*\(|\bnew Function\s*\(|putScript\s*\(|createElement\(['"]script|workers\.dev|deno\.net|proxy\.html|online_mod\./.test(source));
+    assert.ok(!/\beval\s*\(|\bnew Function\s*\(|putScript\s*\(|createElement\(['"]script|workers\.dev|deno\.net|proxy\.html|remote_plugin\./.test(source));
 });
 test('Boolean settings accept Lampa string values', () => {
     assert.equal(C.flag('false',true),false);assert.equal(C.flag('true'),true);assert.equal(C.flag(null,true),true);
@@ -242,11 +242,11 @@ async function feature040Tests(){
     h.m.set('card_logo',false);h.m.parameter('card_logo').onChange();h.m.noLogo();full=fullFixture(h,101);h.m.set('card_logo',true);h.m.parameter('card_logo').onChange();await settle();
     test('Missing logo leaves ordinary text in the main card',()=>assert.equal(full.find('.full-start-new__title').text(),'Братья'));
     h.m.set('card_logo',false);h.m.parameter('card_logo').onChange();
-    const mods=h.$('<div class="full-start__button selector mods">MODS</div>').prependTo(full.find('.full-start-new__buttons'));
-    h.L.Controller.collectionFocus(mods,full);await settle();
+    const other=h.$('<div class="full-start__button selector other">Other</div>').prependTo(full.find('.full-start-new__buttons'));
+    h.L.Controller.collectionFocus(other,full);await settle();
     test('LamPlay wins late competing initial focus',()=>{assert.equal(full.find('.view--lamplay-direct').hasClass('focus'),true);assert.equal(full.find('.view--lamplay-direct').css('order'),'-2147483647');});
-    h.w.document.dispatchEvent(new h.w.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));h.L.Controller.collectionFocus(mods,full);await settle();
-    test('Initial focus priority stops after user navigation',()=>assert.equal(mods.hasClass('focus'),true));h.close();
+    h.w.document.dispatchEvent(new h.w.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));h.L.Controller.collectionFocus(other,full);await settle();
+    test('Initial focus priority stops after user navigation',()=>assert.equal(other.hasClass('focus'),true));h.close();
     h=harness();h.m.aliasMovie();h.m.open(true);await settle();
     test('Compound provider film titles retain TMDB poster, runtime and tagline',()=>{assert.ok(h.$('.lp-cover').attr('src'));assert.match(h.$('.lp-description').first().text(),/Иногда/);assert.match(h.$('.lamplay__item-detail').first().text(),/113 мин/);assert.ok(!h.m.calls.some(r=>r.url.includes('search/movie')));});h.close();
     h=harness();h.m.open();await settle();const previous=h.m.selection;

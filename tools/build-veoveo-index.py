@@ -31,7 +31,7 @@ for row in rows:
         keys.append('kp:' + str(row['kinopoiskId']))
     if row.get('imdbId'):
         keys.append('imdb:' + row['imdbId'])
-    for key in set(keys):
+    for key in dict.fromkeys(keys):
         values = shards[bucket(key)].setdefault(key, [])
         pair = [row['id'], row.get('year', 0)]
         if pair not in values:
