@@ -1,10 +1,10 @@
-/* LamPlay by WaterFAQ - 0.15.0 (experimental)
+/* LamPlay by WaterFAQ - 0.18.0 (experimental)
  * Independent Lampa plugin. Direct connections only; no proxy or remote code execution.
  * Providers: HDrezka, Kodik, AniLiberty, Filmix, CDNvideohub, KinoTochka, VeoVeo.
  */
 (function (root) {
     'use strict';
-    var VERSION = '0.17.0';
+    var VERSION = '0.18.0';
     var RELEASE_DATE = '05.11.2026';
     var KEY = 'lamplay';
     var NAME = 'LamPlay';
@@ -953,7 +953,7 @@
     function keepVisible(pane,target) {
         if (!pane || !target || !pane.contains(target)) return;
         var box=pane.getBoundingClientRect(),rect=target.getBoundingClientRect(),gap=8;
-        if (pane.classList.contains('lp-strip') || pane.classList.contains('lp-tools') && !pane.closest('.lamplay').classList.contains('lp-columns') || pane.classList.contains('lp-body-pane') && target.classList.contains('lp-episode')) {
+        if (pane.classList.contains('lp-strip') || pane.classList.contains('lp-tools') && !pane.closest('.lamplay').classList.contains('lp-columns') || pane.classList.contains('lp-body-pane') && (target.classList.contains('lp-episode') || target.classList.contains('lp-result'))) {
             var horizontal=!pane.classList.contains('lp-body-pane') || !pane.closest('.lamplay').classList.contains('lp-columns');
             var dest=horizontal?pane.scrollLeft+rect.left-box.left+(rect.width-pane.clientWidth)/2:pane.scrollTop+rect.top-box.top+(rect.height-pane.clientHeight)/2;
             dest=Math.max(0,Math.min(dest,horizontal?pane.scrollWidth-pane.clientWidth:pane.scrollHeight-pane.clientHeight));
@@ -1249,7 +1249,7 @@
                 // A native full-card image is reused outside the moving activity pane.
                 var sharp=v==='card';
                 if(sharp && !nativeBackground) {
-                    var url=imageURL(movie.backdrop_path,'w1280') || movie.background_image;
+                    var url=showcaseImage();
                     if(url) nativeBackground=setImage($('<img class="full-start__background loaded lp-native-background" alt="">'),url).css({position:'fixed',transition:'none',zIndex:0});
                 }
                 if(nativeBackground) {nativeBackground.off('load.lpVignette').on('load.lpVignette',function(){if(!destroyed)syncBackground(resultsVisible?'results':view());});if(!nativeBackground.parent().length){var colorBackground=$('.background').last();if(colorBackground.length)nativeBackground.insertAfter(colorBackground);else $('body').prepend(nativeBackground);}nativeBackground.css('display',sharp?'block':'none');}
@@ -1280,7 +1280,13 @@
             function fitEpisodeGeometry(){
                 if(geometryRunning || !html[0].isConnected)return;geometryRunning=true;
                 var v=resultsVisible?'results':view(),bounds=html[0].getBoundingClientRect();html.removeClass('lp-tight');hero.css('margin-bottom','');filters.children().css({position:'',top:'',zIndex:''});bodyPane.css('padding-bottom','');
-                if(v==='results'){html.css('height','');bodyPane.css({'margin-left':'',width:'','padding-left':'','padding-right':'','mask-image':'none','-webkit-mask-image':'none'}).off('scroll.lpEdges');html.find('.lp-strip,.lp-tools').css({width:'','max-width':'','mask-image':'none','-webkit-mask-image':'none'}).off('scroll.lpEdges');geometryRunning=false;return;}
+                if(v==='results'){
+                    html.css('height',Math.max(120,root.innerHeight-Math.max(0,bounds.top))+'px');
+                    bodyPane.css({'margin-left':'',width:'','padding-left':'','padding-right':'','padding-bottom':root.getComputedStyle(body[0]).rowGap});
+                    html.find('.lp-strip,.lp-tools').css({width:'','max-width':'','mask-image':'none','-webkit-mask-image':'none'}).off('scroll.lpEdges');
+                    edgeFade(bodyPane[0],false);bodyPane.off('scroll.lpEdges').on('scroll.lpEdges',function(){edgeFade(this,false);});
+                    geometryRunning=false;return;
+                }
                 html.css('height',Math.max(120,root.innerHeight-Math.max(0,bounds.top))+'px');
                 body.find('.lp-episode').css('width','').find('.lp-picture').css('height','');
                 var sideways=series() && (v==='horizontal' || v==='card');
@@ -1407,7 +1413,7 @@
             function pumpOriginals(){if(destroyed||!resultsVisible)return;while(originalRunning<3 && resultOriginalQueue.length){originalRunning++;resultOriginalQueue.shift()(function(){originalRunning--;pumpOriginals();});}}
             function showResults() {resultOriginalQueue=[];originalRunning=0;
                 resultsVisible=true;body.empty();refreshControls();renderHero();
-                setStatus(results && results.length ? 'Выберите подходящий результат: '+results.length : 'Ничего не найдено. Измените запрос или источник.');
+                setStatus(results && results.length ? '' : 'Ничего не найдено. Измените запрос или источник.');
                 (results||[]).forEach(function (r) {
                     var node=interactive($('<div class="lamplay__item lp-result"></div>'),function () {openRelease(r);});
                     var info=$('<div class="lp-result-info"></div>').append($('<div class="lamplay__item-title"></div>').text(r.title));
@@ -1536,10 +1542,14 @@
                     time:+view.time||0,duration:+view.duration||0,percent:+view.percent||0,hash:view.hash,series:series(),updated:Date.now()};
             }
             function record(snapshot) {saveResume(key,snapshot);}
+            function showcaseImage() {
+                return nativeBackground && nativeBackground.attr('src') || imageURL(movie.backdrop_path,'w1280') || absolute(movie.background_image || '') || imageURL(metadata.details.backdrop_path,'w1280') || '';
+            }
             function renderHero() {
                 var onContinue=last && $(last).hasClass('lp-continue');
                 hero.empty();var d=metadata.details, resume=savedResume();
                 var image=imageURL(d.backdrop_path || d.poster_path,'w780') || release && release.image || '';
+                if(!resultsVisible && (view()==='vertical' || series() && view()==='horizontal'))image=showcaseImage() || image;
                 hero.removeClass('lp-has-cover');
                 if (image && (resultsVisible || view()!=='card')) hero.append(setImage($('<img class="lp-cover" alt="">').on('load',function () {hero.addClass('lp-has-cover');}),image));
                 var content=$('<div class="lp-hero-content"></div>'), title=$('<div class="lp-title-slot"></div>');
@@ -2895,6 +2905,7 @@
         Lampa.Settings.listener.follow('close', function () {
             if (settingsObserver) { settingsObserver.disconnect(); settingsObserver = null; }
         });
+        $('<style id="lamplay-018-style"></style>').text("/* Focus changes only decoration, never the geometry or raster scale of episode content. */\n.lamplay.lp-series[data-view] .lp-episode,.lamplay.lp-series[data-view] .lp-episode.focus,.lamplay.lp-series[data-view] .lp-episode:focus,.lamplay.lp-series[data-view] .lp-episode .lp-picture,.lamplay.lp-series[data-view] .lp-episode.focus .lp-picture,.lamplay.lp-series[data-view] .lp-episode:focus .lp-picture{transform:none}\n.lamplay.lp-series[data-view] .lp-episode,.lp-series .lp-picture{transition:background-color .16s ease}\n.lp-series[data-view=horizontal] .lp-episode.focus .lp-picture,.lp-series[data-view=card] .lp-episode.focus .lp-picture,.lp-series[data-view=horizontal] .lp-episode:focus .lp-picture,.lp-series[data-view=card] .lp-episode:focus .lp-picture{outline:.17em solid #fff;outline-offset:0;box-shadow:none}\n.lp-series[data-view=horizontal] .lp-episode.lp-unavailable.focus .lp-picture,.lp-series[data-view=card] .lp-episode.lp-unavailable.focus .lp-picture,.lp-series[data-view=horizontal] .lp-episode.lp-unavailable:focus .lp-picture,.lp-series[data-view=card] .lp-episode.lp-unavailable:focus .lp-picture{outline-color:rgba(255,255,255,.45)}\n.lamplay.lp-series[data-view] .lp-episode .lp-progress i,.lamplay.lp-series[data-view] .lp-episode.focus .lp-progress i,.lamplay.lp-series[data-view] .lp-episode:focus .lp-progress i{background:#fff}\n.lamplay[data-view=results] .lp-main{padding-top:0}\n.lamplay[data-view=results] .lp-main{position:relative}\n.lamplay[data-view=results] .lp-loader{position:absolute;top:0;left:0;right:0;z-index:3}\n.lamplay[data-view=results] .lp-body-pane{padding-top:0}\n.lamplay[data-view=results] .lp-result.focus,.lamplay[data-view=results] .lp-result:focus{background:rgba(255,255,255,.15);color:#fff;border-color:transparent;outline:none;box-shadow:inset 0 0 0 2px rgba(255,255,255,.75)}\n.lamplay[data-view=results] .lp-result.focus .lamplay__item-detail,.lamplay[data-view=results] .lp-result:focus .lamplay__item-detail{color:rgba(255,255,255,.8)}\n").appendTo('head');
     }
     function start() { install(root.Lampa, root.jQuery || root.$); }
     if (root.Lampa) {

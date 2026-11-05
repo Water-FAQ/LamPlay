@@ -37,7 +37,8 @@ const {chromium}=require('../node_modules/playwright'),assert=require('assert/st
  // Other layouts stay at their published 0.15 geometry.
  for(const film of [false,true]){
   const before=await page(1920,1080,20,film,null,old15),after=await page(1920,1080,20,film);
-  for(const v of film?['vertical','card']:['horizontal','vertical']){await view(before,v);await view(after,v);assert.deepEqual(await geometry(after),await geometry(before));}
+  // 0.18 intentionally removes focus zoom. Compare resting layout, not that old effect.
+  for(const v of film?['vertical','card']:['horizontal','vertical']){await view(before,v);await view(after,v);for(const p of [before,after]){await p.evaluate(()=>Lampa.Controller.collectionFocus(jQuery('.lp-tools .selector').first(),jQuery('.lamplay')));await p.waitForTimeout(300);}assert.deepEqual(await geometry(after),await geometry(before));}
   await before.close();await after.close();
  }
  console.log('PASS film layouts and Series List/Ribbon unchanged from 0.15');
