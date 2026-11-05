@@ -4,7 +4,7 @@
  */
 (function (root) {
     'use strict';
-    var VERSION = '0.16.0';
+    var VERSION = '0.17.0';
     var RELEASE_DATE = '05.11.2026';
     var KEY = 'lamplay';
     var NAME = 'LamPlay';
@@ -1279,7 +1279,7 @@
             }
             function fitEpisodeGeometry(){
                 if(geometryRunning || !html[0].isConnected)return;geometryRunning=true;
-                var v=resultsVisible?'results':view(),bounds=html[0].getBoundingClientRect();html.removeClass('lp-tight');hero.css('margin-bottom','');
+                var v=resultsVisible?'results':view(),bounds=html[0].getBoundingClientRect();html.removeClass('lp-tight');hero.css('margin-bottom','');filters.children().css({position:'',top:'',zIndex:''});bodyPane.css('padding-bottom','');
                 if(v==='results'){html.css('height','');bodyPane.css({'margin-left':'',width:'','padding-left':'','padding-right':'','mask-image':'none','-webkit-mask-image':'none'}).off('scroll.lpEdges');html.find('.lp-strip,.lp-tools').css({width:'','max-width':'','mask-image':'none','-webkit-mask-image':'none'}).off('scroll.lpEdges');geometryRunning=false;return;}
                 html.css('height',Math.max(120,root.innerHeight-Math.max(0,bounds.top))+'px');
                 body.find('.lp-episode').css('width','').find('.lp-picture').css('height','');
@@ -1301,6 +1301,17 @@
                 if(series() && v==='card'){
                     var resumeRow=hero.find('.lp-resume-row')[0],seasonCaption=filters.find('.lp-caption')[0];
                     if(resumeRow && seasonCaption){var resumeBox=resumeRow.getBoundingClientRect(),baseFont=parseFloat(root.getComputedStyle(html[0]).fontSize),resumeBottom=Math.max(resumeBox.bottom,resumeBox.top+baseFont*(.9*2.65)),clearance=resumeBottom+baseFont*.35-seasonCaption.getBoundingClientRect().top;if(clearance>0)hero.css('margin-bottom',Math.ceil(clearance)+'px');}
+                }
+                if(!series())bodyPane.css('padding-bottom',root.getComputedStyle(body[0]).rowGap);
+                // Distribute filter rows inside the existing blank area. Relative offsets
+                // leave the episode strip's flow position, dimensions and scroll range intact.
+                if(series() && v==='card'){
+                    var groups=filters.children(),episode=body.children('.lp-episode').first(),picture=episode.find('.lp-picture')[0];
+                    if(groups.length && picture){
+                        var episodeStyle=root.getComputedStyle(episode[0]),pictureStyle=root.getComputedStyle(picture),imageTop=episode[0].getBoundingClientRect().top+parseFloat(episodeStyle.paddingTop)+parseFloat(episodeStyle.borderTopWidth)+parseFloat(pictureStyle.marginTop),lastBottom=groups.last()[0].getBoundingClientRect().bottom;
+                        var spread=Math.max(0,(imageTop-lastBottom)/2);
+                        groups.each(function(index){$(this).css({position:'relative',zIndex:1,top:(spread*(index+1)/groups.length)+'px'});});
+                    }
                 }
                 html.find('.lp-strip,.lp-tools').each(function(){if($(this).hasClass('lp-strip') || !listLayout())edgeFade(this,true);});
                 if(release && !errorMessage){edgeFade(bodyPane[0],sideways);bodyPane.off('scroll.lpEdges').on('scroll.lpEdges',function(){edgeFade(this,sideways);});}

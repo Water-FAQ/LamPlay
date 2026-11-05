@@ -12,7 +12,9 @@ const {chromium}=require('../node_modules/playwright'),assert=require('assert/st
  const {execFileSync}=require('child_process');
  const old14=execFileSync('git',['show','b96ae0d78f6775472cd5b6611212cf32dc400e51:lamplay.js'],{encoding:'utf8',maxBuffer:2e6});
  const old15=execFileSync('git',['show','cfd752ccb1d695d156aa824a343254ada9c422de:lamplay.js'],{encoding:'utf8',maxBuffer:2e6});
- async function geometry(p){return p.evaluate(()=>{const sels=['.lp-hero-content','.lp-title-slot','.lp-title-logo','.lp-resume-row','.lp-filters','.lp-caption','.lp-strip .lamplay__control','.lp-tools','.lp-body-pane','.lp-picture','.lp-description'];let o={};for(let sel of sels){let n=document.querySelector(sel);if(!n)continue;let s=getComputedStyle(n);o[sel]={box:n.getBoundingClientRect().toJSON(),font:s.fontSize,gap:s.gap,padding:s.padding,margin:s.margin,height:s.height}}return o;});}
+ // 0.17 offsets filter groups visually; retain the 0.16 flow-layout invariant here.
+ // The 0.17 suite checks actual visual positions and the new movie bottom padding.
+ async function geometry(p){return p.evaluate(()=>{const sels=['.lp-hero-content','.lp-title-slot','.lp-title-logo','.lp-resume-row','.lp-filters','.lp-caption','.lp-strip .lamplay__control','.lp-tools','.lp-body-pane','.lp-picture','.lp-description'];let o={};for(let sel of sels){let n=document.querySelector(sel);if(!n)continue;let s=getComputedStyle(n);let box=n.getBoundingClientRect().toJSON(),group=n.closest('.lp-filters')&&n.closest('.lp-strip-group,.lp-tools');if(group){let shift=parseFloat(getComputedStyle(group).top)||0;box.y-=shift;box.top-=shift;box.bottom-=shift;}o[sel]={box,font:s.fontSize,gap:s.gap,padding:sel==='.lp-body-pane'?'':s.padding,margin:s.margin,height:s.height}}return o;});}
  async function view(p,v){await p.evaluate(v=>{while(document.querySelector('.lamplay').dataset.view!==v)mock.click('Вид:')},v);await p.waitForTimeout(350);}
  for(const [w,h,font] of [[1920,1080,20],[1920,1080,24],[1280,720,16],[1280,720,20],[960,540,14]]){
   const before=await page(w,h,font,false,null,old14),after=await page(w,h,font);
