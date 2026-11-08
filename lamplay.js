@@ -513,7 +513,7 @@
             return /^(serial|video)$/.test(type) && id && hash ? absolute('/' + type + '/' + id + '/' + hash + '/720p', page) : '';
         }
         var voices = nodes(dom, 'select option[data-media-id]').map(function (node) {
-            return { id: node.value || node.getAttribute('data-id'), title: node.getAttribute('data-title') || text(node), url: media(node) };
+            return { id: node.value || node.getAttribute('data-id'), title: node.getAttribute('data-title') || text(node), episodeCount: +node.getAttribute('data-episode-count') || 0, url: media(node) };
         }).filter(function (voice) { return voice.url; });
         if (!voices.length) voices.push({ id: 'default', title: fallbackTitle || 'Основной перевод', url: page });
         var seasons = nodes(dom, 'select option[data-serial-id]').map(function (node) {
@@ -619,6 +619,7 @@
                     io.request(url,null,'text',function(html){try{end(kodikCatalog(html,url,voice.title));}catch(e){end(null,e);}},function(e){end(null,e);});
                 }
                 var requested=String(selectedSeason || release.initial && release.initial.currentSeason || '1'),context=release.context;
+                function partLength(catalog){var numbers=catalog.episodes.filter(function(ep){return String(ep.season)===requested;}).map(function(ep){return +ep.number || 0;});if(String(catalog.currentSeason)===requested)catalog.voices.forEach(function(v){numbers.push(v.episodeCount || 0);});return Math.max.apply(null,[0].concat(numbers));}
                 if(!context || !context.seasons || !context.seasons.length){
                     return readPage(voice.url,function(catalog){done(catalog.episodes.filter(function(ep){return !selectedSeason || String(ep.season)===requested;}).map(function(ep){return Object.assign({},ep,{voice:voice});}));});
                 }
@@ -628,7 +629,7 @@
                     if(seasonInfo && seasonInfo.air_date)years.push(String(seasonInfo.air_date).slice(0,4));known.forEach(function(ep){var y=String(ep.air_date || '').slice(0,4);if(/^\d{4}$/.test(y) && years.indexOf(y)<0)years.push(y);});years.sort();if(!years.length)years.push('');
                     var base=release.lookup,original=release.movie.original_name || release.movie.original_title || base,title=release.title,latest=Math.max.apply(null,context.seasons.map(function(x){return +x.season_number;})),urls={},hadError=false;
                     function complete(){state.pending=false;if(hadError && !state.parts.length){delete release.discoveries[requested];state.waiters.forEach(function(j){j[1](new Error('Kodik: не удалось загрузить выбранный сезон. Повторите попытку.'));});return;}state.waiters.forEach(function(j){j[0](state.parts);});state.waiters=[];}
-                    function nextYear(){if(!years.length)return complete();var year=years.shift(),covered=state.parts.reduce(function(n,p){return n+p.catalog.episodes.filter(function(ep){return String(ep.season)===requested;}).length;},0),firstInYear=known.filter(function(ep){return String(ep.air_date || '').slice(0,4)===year;}).map(function(ep){return +ep.episode_number;}).filter(function(n){return n>0;});if(firstInYear.length && Math.min.apply(null,firstInYear)<=covered)return nextYear();var part=state.parts.length+1,names=[];
+                    function nextYear(){if(!years.length)return complete();var year=years.shift(),covered=state.parts.reduce(function(n,p){return n+partLength(p.catalog);},0),firstInYear=known.filter(function(ep){return String(ep.air_date || '').slice(0,4)===year;}).map(function(ep){return +ep.episode_number;}).filter(function(n){return n>0;});if(firstInYear.length && Math.min.apply(null,firstInYear)<=covered)return nextYear();var part=state.parts.length+1,names=[];
                         function name(n){if(n && names.indexOf(n)<0)names.push(n);}
                         // Separate anime seasons/parts require an exact release year; a loose title may return another part.
                         if(+requested===1){name(base);name(original);name(title);}
@@ -653,7 +654,7 @@
                 return discover(function(parts){
                     var rows=[],index=0,offset=0;
                     function next(){if(index>=parts.length)return done(rows);var part=parts[index++],v=part.catalog.voices.filter(function(v){return String(v.id)===String(voice.id);})[0];
-                        var partEpisodes=part.catalog.episodes.filter(function(ep){return String(ep.season)===requested;}),length=partEpisodes.length;
+                        var length=partLength(part.catalog);
                         function append(catalog){var items=catalog?catalog.episodes.filter(function(ep){return String(ep.season)===requested;}):[];
                             items.forEach(function(ep){rows.push(Object.assign({},ep,{number:String(+ep.number+offset),voice:voice}));});offset+=length;next();}
                         if(v)readPage(v.url,append);else append(null);
@@ -1384,7 +1385,7 @@
             function fitStrip() {top.css('min-height','');if(geometryFrame){if(root.cancelAnimationFrame)root.cancelAnimationFrame(geometryFrame);else clearTimeout(geometryFrame);}var refresh=function(){geometryFrame=null;if(destroyed)return;fitEpisodeGeometry();html.find('.lp-control-value').each(function(){$(this).toggleClass('lp-clipped',this.scrollWidth>this.clientWidth+1);});};geometryFrame=root.requestAnimationFrame?root.requestAnimationFrame(refresh):setTimeout(refresh,0);}
             function resized(){clearTimeout(resizeTimer);resizeTimer=setTimeout(function(){if(!destroyed){layout();fitEpisodeGeometry();if(last && html[0].contains(last))focusNode(last);}},100);}
             $(root).on('resize.lamplay',resized);
-            function controlTarget(id) { return filters.add(tools).find('[data-lp-control]').filter(function () {return $(this).attr('data-lp-control')===id;}).first(); }
+            function controlTarget(id) { return filters.add(tools).find('[data-lp-control].selector').filter(function () {return $(this).attr('data-lp-control')===id;}).first(); }
             function searchMenu() {
                 var options = searchNames(movie).map(function (q) {return {title:q,value:q};});
                 options.unshift({title:'Указать название',value:'__input'});
