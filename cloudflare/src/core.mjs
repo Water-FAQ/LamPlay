@@ -1,7 +1,7 @@
 import { HttpError, SOURCES, resolveRoute, transform } from './routes.mjs';
 import { sourcePolicy, resolveKodik } from './source-routes.mjs';
 
-export const VERSION = '0.2.0-preparation';
+export const VERSION = '0.2.1-testing';
 const MAX_BYTES = 1024 * 1024;
 const TIMEOUT_MS = 12000;
 const csv = value => String(value || '').split(',').map(v => v.trim()).filter(Boolean);

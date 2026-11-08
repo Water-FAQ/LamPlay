@@ -16,8 +16,8 @@
     "KODIK_API_ORIGIN": "https://kodik-api.com",
     "KODIK_PLAYER_ORIGIN": "https://kodikplayer.com",
     "FILMIX_MOBILE_ORIGIN": "https://filmixapp.cyou",
-    "KINOTOCHKA_ORIGIN": "https://kinovibe.vip",
-    "KINOTOCHKA_PLAYLIST_ORIGIN": "https://kinovibe.vip"
+    "KINOTOCHKA_ORIGIN": "https://kinovibe.cc",
+    "KINOTOCHKA_PLAYLIST_ORIGIN": "https://kinovibe.cc"
   },
   "ratelimits": [
     {

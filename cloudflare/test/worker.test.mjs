@@ -22,8 +22,8 @@ test('fixed upstream endpoints and source-specific identifiers', () => {
     ['/v1/cdnvideohub/playlist?id=301', 'https://plapi.cdnvideohub.com/api/v1/player/sv/playlist?pub=12&aggr=kp&id=301'],
     ['/v1/cdnvideohub/playlist?id=1&aggr=mali', 'https://plapi.cdnvideohub.com/api/v1/player/sv/playlist?pub=747&aggr=mali&id=1'],
     ['/v1/cdnvideohub/video?id=123', 'https://plapi.cdnvideohub.com/api/v1/player/sv/video/123'],
-    ['/v1/animego/player?id=70', 'https://animego.org/player/70'],
-    ['/v1/animego/episode?id=80', 'https://animego.org/player/videos/80'],
+    ['/v1/animego/player?id=70', 'https://animego.me/player/70'],
+    ['/v1/animego/episode?id=80', 'https://animego.me/player/videos/80'],
     ['/v1/aniboom/embed?id=example123&episode=2&translation=30', 'https://aniboom.one/embed/example123?episode=2&translation=30']
   ];
   for (const [path, target] of cases) assert.equal(resolveRoute(new URL('https://worker.example' + path)).target, target);
@@ -32,7 +32,7 @@ test('fixed upstream endpoints and source-specific identifiers', () => {
 test('query encoding cannot change upstream path or authority', () => {
   const spec = resolveRoute(new URL('https://worker.example/v1/animego/search?q=' + encodeURIComponent('A & id=https://127.0.0.1')));
   const u = new URL(spec.target);
-  assert.equal(u.hostname, 'animego.org'); assert.equal(u.searchParams.get('q'), 'A & id=https://127.0.0.1');
+  assert.equal(u.hostname, 'animego.me'); assert.equal(u.searchParams.get('q'), 'A & id=https://127.0.0.1');
 });
 
 test('malformed, duplicate, secret and arbitrary URL parameters never reach network', async () => {

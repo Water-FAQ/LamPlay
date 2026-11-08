@@ -1,6 +1,6 @@
 {
   "name": "lamplay-metadata-worker",
-  "version": "0.2.0-preparation",
+  "version": "0.2.1-testing",
   "private": true,
   "type": "module",
   "scripts": {

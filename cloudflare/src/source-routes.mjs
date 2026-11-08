@@ -146,7 +146,7 @@ export function resolveSourceRoute(url, env = {}, method = 'GET', body) {
     // This URL is sent to the configured HTTPS API only, never logged or shared-cached.
     return spec(source, host + '/api/v2/' + path + '?' + new URLSearchParams(values), 'filmix-mobile-' + operation, { 'User-Agent': 'okhttp/3.10.0' });
   }
-  const host = origin(env, 'KINOTOCHKA_ORIGIN', 'https://kinovibe.vip');
+  const host = origin(env, 'KINOTOCHKA_ORIGIN', 'https://kinovibe.cc');
   if (url.pathname.endsWith('/find')) { p = fields(['kp']); return spec(source, host + '/api/find-by-kinopoisk.php?' + new URLSearchParams({ kinopoisk: id(p.kp) }), 'kinotochka-find'); }
   if (url.pathname.endsWith('/search')) { p = fields(['q']); return spec(source, host + '/index.php?do=search', 'source-html', { Referer: host + '/' }, { do: 'search', subaction: 'search', search_start: '0', full_search: '0', result_from: '1', story: q(p.q) }); }
   if (url.pathname.endsWith('/page')) { p = fields(['path']); return spec(source, host + pagePath(p.path), 'source-html'); }

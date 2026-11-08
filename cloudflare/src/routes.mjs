@@ -27,7 +27,7 @@ export function resolveRoute(url, env = {}, method = 'GET', body) {
   let p;
   const lib = 'https://api.lib.social/api/';
   const cvh = 'https://plapi.cdnvideohub.com/api/v1/player/sv/';
-  const go = 'https://animego.org';
+  const go = 'https://animego.me';
   const goHeaders = { Referer: go + '/', 'X-Requested-With': 'XMLHttpRequest' };
   switch (url.pathname) {
     case '/v1/animelib/search':
@@ -63,7 +63,7 @@ export function resolveRoute(url, env = {}, method = 'GET', body) {
     case '/v1/aniboom/embed':
       p = parameters(url, ['id', 'episode', 'translation']);
       if (!/^[a-zA-Z0-9]{8,32}$/.test(p.id || '')) bad();
-      return route('aniboom', 'https://aniboom.one/embed/' + p.id + (p.episode || p.translation ? '?' + new URLSearchParams({ ...(p.episode ? { episode: positive(p.episode) } : {}), ...(p.translation ? { translation: positive(p.translation) } : {}) }) : ''), 'aniboom', 0, { Referer: go + '/' });
+      return route('aniboom', 'https://aniboom.one/embed/' + p.id + (p.episode || p.translation ? '?' + new URLSearchParams({ ...(p.episode ? { episode: positive(p.episode) } : {}), ...(p.translation ? { translation: positive(p.translation) } : {}) }) : ''), 'aniboom', 0, { Referer: 'https://animego.org/' });
     default: throw new HttpError(404, 'route_not_found');
   }
 }

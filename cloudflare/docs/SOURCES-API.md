@@ -75,3 +75,6 @@ KINOTOCHKA_ORIGIN — выбранный HTTPS-сайт. Если .txt/.json л�
 ES5-клиент автоматически выбирает POST для Kodik API/resolve, HDRezka episodes/stream, Filmix mobile и любых операций с sessionCookie. Для GET с token/sessionCookie выбрасывает локальную ошибку, не отправляя секрет в URL. Функция `request(route, params, done, fail, method?)` возвращает abort; ошибка содержит code/status без полного URL или токена.
 
 Готово для контрактного теста и пробной публикации. Не проверены реальные доступность/география upstream из Cloudflare, актуальные зеркала, подписанные ссылки на IP ТВ и WebOS-воспроизведение. Вход HDRezka по паролю, хранение сессий, расшифровка HDRezka в Worker и проксирование самого видео не входят в это дополнение.
+
+
+Актуализация 0.2.1-testing: Worker опубликован отдельно, все восемь маршрутов включены. Исторические отметки о выключенных источниках относятся к подготовке. Плагин не подключен. Текущие результаты и ограничения: [SOURCES.md](../../SOURCES.md). KinoTochka использует kinovibe.cc, AnimeGO — animego.me.
