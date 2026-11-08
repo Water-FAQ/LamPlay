@@ -347,3 +347,8 @@ Collaps вернул 410 на двух изученных адресах. VeoVeo
 Для локальных проверок: `npm install`, `npx playwright install chromium`, `npm test`. При необходимости задайте `CHROMIUM_PATH` к установленному Chromium. Сетевые проверки в `npm test` не входят.
 
 Подробная сверка требований: [AUDIT.md](AUDIT.md).
+
+
+## Cloudflare: первая публикация 8 ноября 2026
+
+Worker опубликован отдельно: https://lamplay-metadata.waterfaq.workers.dev. Развернут коммит `2c4e8ac368889b8f4fbd3bc82eb730fa27dae0a3`, GitHub Actions: https://github.com/Water-FAQ/LamPlay/actions/runs/42526091008. Включены восемь подготовленных маршрутов источников. `lamplay.js` и версия 0.22.0 не изменены; подключения плагина к Worker нет.
