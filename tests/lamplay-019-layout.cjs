@@ -20,6 +20,7 @@ const {chromium}=require('../node_modules/playwright'),assert=require('assert/st
     const rect=n=>{const r=n.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height}},h=document.querySelector('.lamplay');
     return {w:innerWidth,inset:parseFloat(getComputedStyle(document.querySelector('.lp-panel')).paddingLeft),hero:rect(document.querySelector('.lp-hero')),caption:[...document.querySelectorAll('.lp-caption')].map(rect),controls:[...document.querySelectorAll('.lp-strip')].map(n=>rect(n.firstElementChild)),tools:rect(document.querySelector('.lp-tools')),first:rect(document.querySelector('.lp-episode .lp-picture')),last:rect([...document.querySelectorAll('.lp-episode')].at(-1)),pane:rect(document.querySelector('.lp-body-pane')),loader:rect(document.querySelector('.lp-loader')),sideButtons:[...document.querySelectorAll('.lp-side .lamplay__control')].map(rect),tight:h.classList.contains('lp-tight')};
    });
+   console.log('GEOMETRY',size[0],v,JSON.stringify(g));await p.screenshot({path:__dirname+'/renders/019-'+size[0]+'-'+v+'.png'});
    const near=(a,b,label)=>assert.ok(Math.abs(a-b)<1.5,label+' '+JSON.stringify(g));
    assert.equal(g.tight,false);near(g.hero.x,g.inset,'hero inset');
    if(v==='horizontal')anchor=g.hero;
@@ -37,4 +38,4 @@ const {chromium}=require('../node_modules/playwright'),assert=require('assert/st
   }
  }
  assert.deepEqual(errors,[]);await b.close();console.log('PASS 019 shared covers, insets, headers, loader and terminal scroll at 720p/1080p');
-})().catch(e=>{console.error(e);process.exitCode=1;});
+})().catch(e=>{console.error(e);process.exit(1);});
