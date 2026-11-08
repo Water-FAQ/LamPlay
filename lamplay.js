@@ -1181,7 +1181,7 @@
     }
     function configureBundle(bundle,metadata) {
         var groups={};bundle.entries.forEach(function(e){var identity=seasonIdentity(e.result.title),n=identity.season; e.identity=identity;(groups[n] || (groups[n]=[])).push(e);});
-        bundle.seasonKeys=[];bundle.seasonLabels={};bundle.splitParts=false;
+        bundle.seasonKeys=[];bundle.seasonLabels={};bundle.splitParts=false;var chosen=bundle.entries.filter(function(e){return String(e.result.id)===bundle.selectedResult;})[0];bundle.selectedVoice=chosen && chosen.release && chosen.release.voices[0] && chosen.release.voices[0].id;
         Object.keys(groups).sort(numSort).forEach(function(n){
             var entries=groups[n].sort(function(a,b){return (a.identity.part || 0)-(b.identity.part || 0) || naturalCompare(a.result.title,b.result.title);});
             var expected=list(metadata.seasons).filter(function(s){return +s.season_number===+n;})[0],total=0,offset=0;
@@ -1423,7 +1423,7 @@
             var healthIo=new Transport(Lampa,setting), healthProviders=buildProviders(healthIo), healthPending=[], healthActive=0, healthNodes={}, healthStarted=false;
             var source = providers.filter(function (p) { return p.id === historySource(movie); })[0] || providers.filter(function(p){return p.id===setting('source','rezka');})[0] || providers[0];
             var initialQuery = movie.title || movie.name || movie.original_title || movie.original_name || '';
-            var resultsVisible=false;
+            var resultsVisible=false,pendingScroll=null;
             var query = initialQuery, release = null, resultSelected = null, voice = null, season = '', episodes = [], results = null;
             var openingEpisode=false,lastEpisodeKey = null, lastControl = '', returnFilter = '', lastResult=null, resultFilter='source';
             var nativeImage=$('.full-start__background.loaded').not('.lp-native-background').last(), nativeBackground=cardBackgroundSnapshot;cardBackgroundSnapshot=null;
@@ -1661,8 +1661,8 @@
                 query=state.query;release=state.release;resultSelected=state.resultSelected;voice=state.voice;season=state.season;episodes=state.episodes;results=state.results;resultsVisible=state.resultsVisible;
                 metadata=state.metadata;metadataPending=false;catalogSeasons=state.catalog;countRows=state.countRows;countKnown=state.countKnown;countPending=state.countPending;countRelease=release;countSource=id;reverse=state.reverse;
                 lastEpisodeKey=state.lastEpisode;lastControl=state.lastControl;busy=false;finish();
-                if(resultsVisible){showResults();last=body.find('.lp-result')[Math.max(0,state.resultIndex)] || last;self.start();}else if(release){body.empty();begin('Восстанавливаем источник…',function(){switchSource(id);});prepareEpisodes();}
-                setTimeout(function(){if(!destroyed && source.id===id){bodyPane[0].scrollLeft=state.scrollX;bodyPane[0].scrollTop=state.scrollY;}},0);
+                if(resultsVisible){showResults();last=body.find('.lp-result')[Math.max(0,state.resultIndex)] || last;self.start();}else if(release){body.empty();begin('Восстанавливаем источник…',function(){switchSource(id);});pendingScroll={x:state.scrollX,y:state.scrollY};prepareEpisodes(state.lastEpisode);}
+                setTimeout(function(){if(!destroyed && source.id===id && resultsVisible){bodyPane[0].scrollLeft=state.scrollX;bodyPane[0].scrollTop=state.scrollY;}},0);
             }
             function sourceMenu(back){
                 healthNodes={};checkSources();
@@ -1794,7 +1794,7 @@
                     list(r.episodes).concat(list(r.initial && r.initial.episodes)).forEach(function(ep){addSeason(ep.season);});
                     list(r.voices).forEach(function(v){list(v.rows).forEach(function(row){Object.keys(row.seasons || {}).forEach(addSeason);});});
                     if(r.bundle)r.seasonKeys.forEach(addSeason);
-                    voice=r.voices[0];season=r.selectedSeason || '';loadMetadata(result);
+                    voice=r.voices.filter(function(v){return String(v.id)===String(r.selectedVoice);})[0] || r.voices[0];season=r.selectedSeason || '';loadMetadata(result);
                     var saved=pendingResume || savedResume();
                     if (saved && saved.source===source.id && String(saved.result.id)===String(result.id)) {
                         voice=r.voices.filter(function (v) {return String(v.id)===String(saved.voice.id);})[0] || voice;
@@ -1835,10 +1835,10 @@
                 },failed,season);}
                 if(source.id==='kodik' || release.bundle){var ticket=generation,started=Date.now();function ready(){if(destroyed || ticket!==generation)return;if(metadataPending && Date.now()-started<3000){presentationTimer=setTimeout(ready,30);return;}if(release.bundle && !release.configured){configureBundle(release,metadata.details);release.configured=true;catalogSeasons=release.seasonKeys.slice();season=release.selectedSeason || season;}var s=season || release.initial && release.initial.currentSeason || '1';release.context={seasons:metadata.details.seasons || [],episodes:metadata.seasons};loadSeasonMetadata(s,requestEpisodes);}ready();}else requestEpisodes();
             }
-            function prepareEpisodes(){
+            function prepareEpisodes(restore){
                 var ticket=generation,started=Date.now(),ended=false,assetsStarted=false,countsReady=false,metadataReady=false;
                 function live(){return !destroyed && ticket===generation;}
-                function reveal(){if(ended || !live())return;ended=true;clearTimeout(presentationTimer);finish();renderEpisodes();resumeWhenReady();}
+                function reveal(){if(ended || !live())return;ended=true;clearTimeout(presentationTimer);finish();renderEpisodes(restore);if(pendingScroll){var scroll=pendingScroll;pendingScroll=null;function apply(){if(!live())return;if(bodyPane[0]._lpScrollFrame){setTimeout(apply,20);return;}bodyPane[0].scrollLeft=scroll.x;bodyPane[0].scrollTop=scroll.y;}apply();}resumeWhenReady();}
                 function assets(){
                     if(!live() || ended || assetsStarted || !countsReady || !metadataReady)return;assetsStarted=true;
                     var rows=visibleEpisodes(),first=0;

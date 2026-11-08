@@ -3,7 +3,7 @@ const {chromium}=require('../node_modules/playwright'),assert=require('assert/st
 (async()=>{
  const b=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,headless:true,args:['--no-sandbox','--disable-dev-shm-usage','--disable-gpu']}),p=await b.newPage({viewport:{width:1280,height:720}}),errors=[];p.on('pageerror',e=>errors.push(e.message));
  await p.setContent('<html><head><style>html{font:20px Arial}body{margin:0;height:100vh;color:white}*{box-sizing:border-box}</style></head><body><header class="head"><div class="head__body">Lampa header</div></header><div class="background"><canvas class="background__one"></canvas></div></body></html>');
- await p.addStyleTag({path:__dirname+'/research/host.css'});await p.addScriptTag({path:__dirname+'/../node_modules/jquery/dist/jquery.min.js'});await p.addScriptTag({path:__dirname+'/fixtures/lampa-mock.js'});await p.addScriptTag({path:__dirname+'/../lamplay.js'});await p.evaluate(()=>mock.open());await p.waitForTimeout(180);
+ await p.addStyleTag({path:__dirname+'/research/host.css'});await p.addScriptTag({path:__dirname+'/../node_modules/jquery/dist/jquery.min.js'});await p.addScriptTag({path:__dirname+'/fixtures/lampa-mock.js'});await p.addScriptTag({path:__dirname+'/../lamplay.js'});await p.evaluate(()=>mock.open());await p.waitForFunction(()=>!document.querySelector('.lamplay').classList.contains('lp-loading'));
  // Remote control navigation from the first selector of every strip.
  for(const selector of ['.lp-strip-group:first-child .selector:first-child','.lp-strip-group:nth-child(2) .selector:first-child','.lp-tools .selector:first-child']){
   await p.evaluate(sel=>{Lampa.Controller.collectionFocus(jQuery(sel),jQuery('.lamplay'));mock.controllers.content.left();},selector);
