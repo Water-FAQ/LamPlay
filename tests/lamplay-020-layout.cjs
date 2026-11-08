@@ -1,0 +1,38 @@
+const {chromium}=require('../node_modules/playwright'),assert=require('assert/strict'),fs=require('fs');
+(async()=>{fs.mkdirSync(__dirname+'/renders',{recursive:true});const b=await chromium.launch({executablePath:process.env.CHROMIUM_PATH,args:['--no-sandbox']}),errors=[];
+ async function page(width=1920,height=1080,font=20,film=false,metadata=null,code=null,results=false){
+  const p=await b.newPage({viewport:{width,height}});p.on('pageerror',e=>errors.push(e.message));await p.setContent('<div class="wrap"><div class="wrap__content"><div class="activitys"><div class="activitys__slides"><div class="activity activity--active"><div class="activity__body" id="activity"></div></div></div></div></div></div><header class="head"><div class="head__title">LamPlay</div></header>');await p.addStyleTag({path:__dirname+'/research/host.css'});
+  await p.addStyleTag({content:`html,body{font:${font}px Arial;margin:0;height:100vh;width:100vw;background:#25313b;color:white}*{box-sizing:border-box}.wrap,.wrap__content,.activitys{width:100%}.activitys__slides,.activity__body{height:100vh}.activity{opacity:1}.head{height:4em}.lp-cover{opacity:1}`});
+  for(let f of ['../node_modules/jquery/dist/jquery.min.js','fixtures/lampa-mock.js'])await p.addScriptTag({path:__dirname+'/'+f});
+  await p.evaluate(()=>{jQuery('body').prepend('<div class="background" style="background:linear-gradient(120deg,rgb(105,35,55),rgb(40,110,140));z-index:0"></div>');jQuery('body').append(jQuery('<img class="full-start__background loaded">').attr('src',mock.svg('Native')));window.hostMask=getComputedStyle(document.querySelector('.full-start__background')).webkitMaskImage;mock.backgroundCalls=[];Lampa.Utils.cardImgBackground=c=>{mock.backgroundCard=c;return mock.svg('Colors')};Lampa.Background={change:src=>mock.backgroundCalls.push(src)};});
+  await p.evaluate(meta=>{if(!meta)return;const Original=Lampa.Reguest;Lampa.Reguest=function(){let r=new Original(),request=r.native;r.native=r.silent=(url,done,...rest)=>request.call(r,url,value=>{if(url.includes('/ajax/get_cdn_series')&&value.url)Object.assign(value,meta);done(value)},...rest);return r;};},metadata);
+  await p.evaluate(()=>{const push=Lampa.Activity.push;Lampa.Activity.push=function(o){const screen=push(o);jQuery('#activity').append(screen.render());screen.start();return screen};});await p.evaluate(r=>window.testResults=r,results);await p.addScriptTag(code?{content:code}:{path:__dirname+'/../lamplay.js'});await p.evaluate(f=>{const Original=Lampa.Reguest;Lampa.Reguest=function(){let r=new Original(),request=r.native;r.native=r.silent=(u,done,...a)=>request.call(r,u,d=>{if(u.includes('/season/')&&d.episodes){d.episodes[0].runtime=80;d.episodes[1].runtime=60;d.episodes[2].runtime=45;}done(d)},...a);return r;};if(window.testResults){mock.ambiguous();mock.set('view_series',window.testResults);mock.set('view_movie',window.testResults);const Req=Lampa.Reguest;Lampa.Reguest=function(){const r=new Req(),native=r.native;r.native=r.silent=(url,done,...args)=>native.call(r,url,data=>{if(url.includes('do=search')||url.includes('/engine/ajax/search.php'))data=Array.from({length:24},(_,i)=>String(data).replaceAll('/1.html','/'+(100+i)+'.html').replaceAll('/2.html','/'+(200+i)+'.html')).join('');done(data)},...args);return r;};}mock.open(f)},film);await p.waitForTimeout(300);return p;
+ }
+
+
+ async function view(p,v){await p.evaluate(v=>{while(document.querySelector('.lamplay').dataset.view!==v)mock.click('Вид:')},v);await p.waitForTimeout(350)}
+
+
+ for(const size of [[1920,1080,20],[1280,720,16]]){
+  let cover=null;
+  for(const v of ['horizontal','vertical','card']){
+   const p=await page(...size);await view(p,v);await p.waitForTimeout(500);
+   const g=await p.evaluate(()=>{const r=n=>{let b=n.getBoundingClientRect();return {x:b.x,y:b.y,w:b.width,h:b.height,right:b.right,bottom:b.bottom}},h=document.querySelector('.lamplay'),pane=document.querySelector('.lp-body-pane'),first=document.querySelector('.lp-episode'),pic=first.querySelector('.lp-picture');return {hero:r(document.querySelector('.lp-hero')),pane:r(pane),picture:r(pic),row:r(first),tools:r(document.querySelector('.lp-tools')),inset:parseFloat(getComputedStyle(document.querySelector('.lp-panel')).paddingLeft),title:getComputedStyle(first.querySelector('.lamplay__item-title')).fontSize,white:getComputedStyle(first.querySelector('.lamplay__item-title')).whiteSpace,last:r(document.querySelector('.lp-episode:last-child')), captions:[...document.querySelectorAll('.lp-caption')].map(r),controls:[...document.querySelectorAll('.lp-strip')].map(n=>r(n.firstElementChild)),buttons:[...document.querySelectorAll('.lp-side .lamplay__control')].map(r)};});
+   console.log('GEOMETRY',size[0],v,JSON.stringify(g));
+   assert.ok(Math.abs(g.hero.x-g.inset)<1.5);
+   if(v==='horizontal')cover=g.hero;
+   if(v==='vertical'){assert.ok(Math.abs(g.hero.w-cover.w)<1.5);assert.ok(Math.abs(g.hero.h-cover.h)<1.5);g.buttons.forEach(r=>assert.ok(Math.abs(r.w-g.hero.w)<1.5));}
+   g.controls.forEach((r,i)=>assert.ok(Math.abs(r.x-g.captions[i].x)<1.5));
+   if(v!=='vertical'){assert.equal(g.white,'nowrap');assert.ok(g.picture.w/size[0]>=.215,'four complete cards');assert.ok(g.last.bottom<=size[1]+1,'text fits');assert.ok(g.picture.y-g.tools.bottom>15,'breathing room');}
+   await p.evaluate(()=>Lampa.Controller.collectionFocus(jQuery('.lp-episode').eq(1),jQuery('.lamplay')));await p.waitForTimeout(330);
+   const f=await p.evaluate(()=>{let n=document.querySelector('.lp-episode.focus'),pic=n.querySelector('.lp-picture');return {row:getComputedStyle(n).transform,pic:getComputedStyle(pic).transform,transition:getComputedStyle(pic).transitionDuration,border:getComputedStyle(n,'::after').boxShadow,z:getComputedStyle(n,'::after').zIndex}});
+   if(v==='vertical'){assert.ok(f.row.includes('1.015'),JSON.stringify(f));assert.equal(f.z,'10');assert.ok(f.border.includes('255, 255, 255'));}else assert.ok(f.pic.includes('1.045'),JSON.stringify(f));assert.equal(f.transition,'0.26s');
+   await p.screenshot({path:__dirname+'/renders/020-'+size[0]+'-'+v+'.png'});
+   // Focusing an already focused row cannot perturb the scroll target mid-animation.
+   const motion=await p.evaluate(async()=>{const n=jQuery('.lp-episode').eq(3);Lampa.Controller.collectionFocus(n,jQuery('.lamplay'));await new Promise(r=>setTimeout(r,80));Lampa.Controller.collectionFocus(n,jQuery('.lamplay'));await new Promise(r=>setTimeout(r,400));const pane=document.querySelector('.lp-body-pane'),a=[pane.scrollLeft,pane.scrollTop];Lampa.Controller.collectionFocus(n,jQuery('.lamplay'));await new Promise(r=>setTimeout(r,400));return {a,b:[pane.scrollLeft,pane.scrollTop]}});assert.ok(motion.a.every((n,i)=>Math.abs(n-motion.b[i])<1.5),JSON.stringify(motion));
+   await p.close();
+  }
+  const p=await page(...size,false,null,null,'vertical');await p.waitForTimeout(400);const result=await p.evaluate(()=>{const a=document.querySelector('.lp-side'),b=document.querySelector('.lp-hero'),c=document.querySelector('.lp-side .lamplay__control'),r=n=>({x:n.getBoundingClientRect().x,w:n.getBoundingClientRect().width,h:n.getBoundingClientRect().height});return {side:r(a),hero:r(b),button:r(c),inset:parseFloat(getComputedStyle(document.querySelector('.lp-panel')).paddingLeft)}});assert.ok(Math.abs(result.hero.w-cover.w)<1.5);assert.ok(Math.abs(result.hero.h-cover.h)<1.5);assert.ok(Math.abs(result.hero.w-result.button.w)<1.5);assert.ok(Math.abs(result.hero.x-result.inset)<1.5);await p.screenshot({path:__dirname+'/renders/020-'+size[0]+'-results.png'});await p.close();
+ }
+ assert.deepEqual(errors,[]);await b.close();console.log('PASS 020 geometry, four cards, smooth focus, stable scrolling and results parity');
+})().catch(e=>{console.error(e);process.exit(1)});
