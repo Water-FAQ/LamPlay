@@ -1,6 +1,6 @@
 # Подготовка Cloudflare — 08.11.2026
 
-Самостоятельный пакет без изменения lamplay.js. Проверены 21 тест Worker/клиента, синтаксис и Wrangler dry-run. Проверка runtime предусмотрена отдельным cloudflare-check.yml без секретов. Облачной публикации, нового релиза плагина и проверки ТВ нет. Состояние подготовки и ограничения: [cloudflare/docs/VALIDATION.md](cloudflare/docs/VALIDATION.md).
+Самостоятельный пакет без изменения lamplay.js. Проверены 21 тест Worker/клиента, синтаксис и Wrangler dry-run. Проверка runtime workerd успешно выполнена отдельным cloudflare-check.yml без секретов: https://github.com/Water-FAQ/LamPlay/actions/runs/42521055702 . Облачной публикации, нового релиза плагина и проверки ТВ нет. Состояние подготовки и ограничения: [cloudflare/docs/VALIDATION.md](cloudflare/docs/VALIDATION.md).
 
 ---
 

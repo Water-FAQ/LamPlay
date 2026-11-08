@@ -11,7 +11,7 @@
 
 ## Проверка runtime в GitHub Actions
 
-Сценарий cloudflare-check.yml запускает те же проверки, dry-run и `runtime-smoke.mjs` под Node 22. Smoke запускает локальный workerd, проверяет /health, source_disabled и отказ чужому Origin. Внешние источники и Cloudflare-аккаунт не используются. Ссылка на фактический прогон добавляется после его завершения.
+Сценарий cloudflare-check.yml запускает те же проверки, dry-run и `runtime-smoke.mjs` под Node 22. Smoke запускает локальный workerd, проверяет /health, source_disabled и отказ чужому Origin. Внешние источники и Cloudflare-аккаунт не используются. Все этапы успешно завершены: [GitHub Actions 42521055702](https://github.com/Water-FAQ/LamPlay/actions/runs/42521055702), проверенный код `656222692ba16c318b778dcfdbda1df2a938ace1`. Входной модуль экспортирует только Worker handler; тестируемое ядро вынесено в отдельный модуль.
 
 ## Не подтверждено
 
