@@ -9,7 +9,7 @@
     "enabled": false
   },
   "vars": {
-    "ENABLED_SOURCES": "",
+    "ENABLED_SOURCES": "animelib,cdnvideohub,animego,aniboom,rezka,kodik,filmix,kinotochka",
     "ALLOWED_ORIGINS": "http://lampa.mx,https://lampa.mx",
     "ALLOW_ORIGINLESS": "false",
     "REZKA_ORIGIN": "https://rezka.ag",
