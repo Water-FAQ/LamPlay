@@ -14,6 +14,7 @@ async function ui(setup){const d=new JSDOM('<body></body>',{url:'http://lampa.te
  let rows=await new Promise((ok,no)=>p.episodes(bundle,bundle.voices[0],ok,no,'1'));assert.deepEqual(rows.map(e=>e.number),['1','2','3','4']);
  await new Promise((ok,no)=>p.resolve(bundle,rows[2],ok,no));assert.deepEqual(nativeCalls,[['b','1','1']]);
  C.configureBundle(bundle,{seasons:[{season_number:1,episode_count:5}]});assert.deepEqual(bundle.seasonKeys,['1.1','1.2','2']);assert.equal(bundle.seasonLabels['1.2'],'Сезон 1 · Часть 2');
+ const specials=C.kodikResults([{id:'one',shikimori_id:1,type:'anime-serial',title:'Тест TV1'},{id:'ova',shikimori_id:1,type:'anime-serial',title:'Тест OVA'}]);assert.equal(specials.length,2);
  console.log('PASS universal markers, natural chronology, confirmed part joining, safe split fallback and native playback identity');
  let d=await ui(`const Req=Lampa.Reguest;Lampa.Reguest=function(){const r=new Req(),old=r.native;r.native=r.silent=(u,ok,...args)=>old(u,v=>{if(u.includes('/season/'))setTimeout(()=>ok(v),450);else ok(v)},...args);return r;};`),w=d.window,$=w.jQuery;w.mock.open();await wait(140);
  assert.ok($('.lp-skeleton').length);assert.equal($('[data-count-voice]').length,0);assert.equal($('.lp-episode:not(.lp-skeleton)').length,0);

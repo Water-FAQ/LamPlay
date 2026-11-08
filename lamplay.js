@@ -441,7 +441,7 @@
             }, 'json', function (response) {
                 if (response && response.success === false) return fail(new Error('HDrezka не вернула серии для выбранной озвучки.'));
                 var episodes = rezkaEpisodes(response && response.episodes || '');
-                if (!episodes.length) return fail(new Error('HDrezka: список серий пуст. Попробуйте другую озвучку.'));
+                if (!episodes.length){if(response && response.success===true)return done([]);return fail(new Error('HDrezka: список серий не получен. Попробуйте другую озвучку.'));}
                 episodes.forEach(function (episode) { episode.voice = voice; });
                 done(episodes);
             }, fail, options(release.url));
@@ -474,6 +474,7 @@
         list(rows).forEach(function (row) {
             var key = row.shikimori_id ? 'shiki:' + row.shikimori_id : row.kinopoisk_id ? 'kp:' + row.kinopoisk_id :
                 row.imdb_id ? 'imdb:' + row.imdb_id : 'title:' + row.title + ':' + row.year;
+            if(seasonIdentity(row.title).special)key+=':special:'+normal(row.title);
             if (!groups[key]) {
                 groups[key] = { id: key, title: row.title || row.title_orig || 'Без названия', original: row.title_orig,
                     year: row.year, rows: [], series: /serial/.test(row.type || ''), description: row.type || '' };
@@ -754,7 +755,7 @@
                         var key = season + ':' + number;
                         if (!url || seen[key]) return;
                         seen[key] = true;
-                        episodes.push({ season: season, number: number, title: 'Серия ' + number, url: url, voice: voice });
+                        episodes.push({ season: season, number: number, title: typeof value==='object' && value.title || 'Серия ' + number, url: url, voice: voice });
                     });
                 });
                 if (!Object.keys(seasons).length && row.link) episodes.push({ season: '', number: '', title: release.title,
@@ -2439,8 +2440,8 @@
             onContextMenu:function(){return{name:'LamPlay',description:SUMMARY,subtitle:SUMMARY};},
             onContextLauch:function(movie){cardBackgroundSnapshot=null;Lampa.Activity.push({component:KEY,title:NAME,movie:movie,page:1,url:''});}};
         $('<style id="lamplay-022-style"></style>').text([
-            '.selectbox-item__icon:has(.lamplay-logo){flex:0 0 2em;width:2em;height:2em;display:flex;align-items:center;justify-content:center}',
-            '.selectbox-item__icon .lamplay-logo{width:100%;height:100%;max-width:100%;max-height:100%;margin:0}',
+            '.selectbox-item__icon .lamplay-logo{display:block}',
+            '.selectbox-item__icon .lamplay-logo{width:2.7em;height:2.7em;max-width:100%;max-height:100%;margin:0}',
             '.lamplay .lp-search{max-width:22em;min-width:0;flex-shrink:0}.lamplay .lp-search .lp-control-value{display:block;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}',
             '.lamplay.lp-columns .lp-search{max-width:100%;width:100%}',
             '.lamplay.lp-series[data-view=horizontal] .lp-episode .lp-picture,.lamplay.lp-series[data-view=card] .lp-episode .lp-picture{transform-origin:center!important}',
@@ -2450,6 +2451,7 @@
         ].join('\n')).appendTo('head');
         var nativeSelectShow=Lampa.Select.show;
         Lampa.Select.show=function(options){
+            if(options && options.items){options.items=options.items.map(function(item){if(item.title!==NAME)return item;var copy=Object.assign({},item,{subtitle:SUMMARY});if(typeof copy.icon==='string' && copy.icon.indexOf('lamplay-logo')>=0)copy.icon=copy.icon.replace('viewBox="5 5 54 54"','viewBox="13 12 39 41"');return copy;});}
             if(options && options.items && flag(setting('button_first',true),true)){
                 var index=options.items.map(function(i){return i.title===NAME && (i.subtitle===SUMMARY || i.description===SUMMARY || i.subtitle==='Смотреть онлайн' || i.description==='Смотреть онлайн');}).indexOf(true);
                 if(index>0){options.items=options.items.slice();options.items.unshift(options.items.splice(index,1)[0]);}
