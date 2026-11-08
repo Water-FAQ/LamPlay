@@ -1,9 +1,10 @@
 {
   "name": "lamplay",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "private": true,
   "scripts": {
-    "test": "node tests/lamplay.test.cjs && node tests/lamplay-providers.cjs && node tests/lamplay-browser.cjs && node tests/lamplay-ui-regressions.cjs && node tests/lamplay-060-regressions.cjs && node tests/lamplay-070-regressions.cjs && node tests/lamplay-080-regressions.cjs && node tests/lamplay-090-regressions.cjs && node tests/lamplay-010-regressions.cjs && node tests/lamplay-011-regressions.cjs && node tests/lamplay-012-regressions.cjs && node tests/lamplay-013-regressions.cjs && node tests/lamplay-014-regressions.cjs && node tests/lamplay-015-regressions.cjs && node tests/lamplay-016-regressions.cjs && node tests/lamplay-017-regressions.cjs && node tests/lamplay-018-regressions.cjs"
+    "test": "node tests/lamplay.test.cjs && node tests/lamplay-providers.cjs && node tests/lamplay-browser.cjs && node tests/lamplay-ui-regressions.cjs && node tests/lamplay-060-regressions.cjs && node tests/lamplay-070-regressions.cjs && node tests/lamplay-080-regressions.cjs && node tests/lamplay-090-regressions.cjs && node tests/lamplay-010-regressions.cjs && node tests/lamplay-011-regressions.cjs && node tests/lamplay-012-regressions.cjs && node tests/lamplay-013-regressions.cjs && node tests/lamplay-014-regressions.cjs && node tests/lamplay-015-regressions.cjs && node tests/lamplay-016-regressions.cjs && node tests/lamplay-017-regressions.cjs && node tests/lamplay-018-regressions.cjs",
+    "test:019": "node tests/lamplay-019-logic.cjs && node tests/lamplay-019-layout.cjs"
   },
   "devDependencies": {
     "playwright": "1.64.1",

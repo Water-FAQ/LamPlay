@@ -1,0 +1,23 @@
+name: Validate LamPlay UI
+on:
+  push:
+    branches: [fix/0.19-layout]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/lamplay.test.cjs && node tests/lamplay-providers.cjs && node tests/lamplay-019-logic.cjs
+      - run: node tests/lamplay-019-layout.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-review
+          path: tests/renders/
