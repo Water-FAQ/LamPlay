@@ -1798,14 +1798,14 @@
             }
             function loadMetadata(target) {
                 if (!Lampa.TMDB) return;
-                var related=type==='tv' && relatedSeason(movie,target);
+                var identity=seasonIdentity(target && target.title),related=type==='tv' && relatedSeason(movie,target) && !!(identity.season || identity.part || identity.final);
                 var sameCard = related || !target || [movie.title,movie.name,movie.original_title,movie.original_name].some(function (name) {return name && sameTitle(name,target.title);});
                 var sourceType = target && release ? (series()?'tv':'movie') : type;
                 var cardYear=String(movie.release_date||movie.first_air_date||'').slice(0,4);
                 if (!related && target && target.year && cardYear && String(target.year)!==cardYear || sourceType!==type) sameCard=false;
                 var directId = sameCard && (!movie.source || ['tmdb','cub'].indexOf(movie.source)>=0) ? movie.id : null;
-                var name = target && target.title || initialQuery;
-                var year = target && target.year || String(movie.release_date || movie.first_air_date || '').slice(0,4);
+                var name = related?initialQuery:(target && target.title || initialQuery);
+                var year = related?cardYear:(target && target.year || cardYear);
                 var signature = sourceType+'|'+(directId || name+'|'+year);
                 if (metadata.signature===signature) {if(target){if(metadata.id)metadata.request++;metadata.seasons={};if(season)loadSeasonMetadata(season);}return;}
                 metadata.signature=signature;metadata.id=null;metadata.seasons={};metadata.logo='';

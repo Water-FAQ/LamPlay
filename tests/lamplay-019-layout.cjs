@@ -32,6 +32,9 @@ const {chromium}=require('../node_modules/playwright'),assert=require('assert/st
    for(let i=0;i<g.caption.length;i++)near(g.caption[i].x,g.controls[i].x,'caption start');
    if(v==='horizontal'){near(g.caption[0].y,g.hero.y,'top');assert.ok(g.tools.bottom<=g.hero.bottom+1.5)}
    if(v==='card' || v==='horizontal'){assert.ok(g.loader.y>=g.tools.bottom-1,'loader intersects filters '+JSON.stringify(g));assert.ok(g.last.bottom<=size[1]+1,'episode text outside viewport '+JSON.stringify(g));}
+   if(v!=='vertical'){
+    const stable=await p.evaluate(()=>{const pick=()=>[...document.querySelectorAll('.lp-caption,.lp-tools,.lp-loader,.lp-episode .lp-picture')].map(n=>{const r=n.getBoundingClientRect();return [r.y,r.height]});const before=pick(),nodes=[...document.querySelectorAll('.lp-description')],texts=nodes.map(n=>n.textContent);nodes.forEach(n=>n.textContent='');document.querySelector('.lamplay').classList.add('lp-loading');const after=pick();nodes.forEach((n,i)=>n.textContent=texts[i]);document.querySelector('.lamplay').classList.remove('lp-loading');return {before,after}});assert.deepEqual(stable.after,stable.before,'metadata/loading changes geometry');
+   }
    await p.evaluate(()=>Lampa.Controller.collectionFocus(jQuery('.lp-episode').last(),jQuery('.lamplay')));await p.waitForTimeout(400);
    const end=await p.evaluate(()=>({right:document.querySelector('.lp-episode:last-child').getBoundingClientRect().right,bound:innerWidth-parseFloat(getComputedStyle(document.querySelector('.lp-panel')).paddingRight),mask:getComputedStyle(document.querySelector('.lp-body-pane')).webkitMaskImage}));near(end.right,end.bound,'last episode end');
    await p.screenshot({path:__dirname+'/renders/019-'+size[0]+'-'+v+'.png'});await p.close();
