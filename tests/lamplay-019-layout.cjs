@@ -31,7 +31,7 @@ const {chromium}=require('../node_modules/playwright'),assert=require('assert/st
    }else near(g.first.x,g.hero.x,'first episode left');
    for(let i=0;i<g.caption.length;i++)near(g.caption[i].x,g.controls[i].x,'caption start');
    if(v==='horizontal'){near(g.caption[0].y,g.hero.y,'top');assert.ok(g.tools.bottom<=g.hero.bottom+1.5)}
-   if(v==='card' || v==='horizontal')assert.ok(g.loader.y>=g.tools.bottom-1,'loader intersects filters '+JSON.stringify(g));
+   if(v==='card' || v==='horizontal'){assert.ok(g.loader.y>=g.tools.bottom-1,'loader intersects filters '+JSON.stringify(g));assert.ok(g.last.bottom<=size[1]+1,'episode text outside viewport '+JSON.stringify(g));}
    await p.evaluate(()=>Lampa.Controller.collectionFocus(jQuery('.lp-episode').last(),jQuery('.lamplay')));await p.waitForTimeout(400);
    const end=await p.evaluate(()=>({right:document.querySelector('.lp-episode:last-child').getBoundingClientRect().right,bound:innerWidth-parseFloat(getComputedStyle(document.querySelector('.lp-panel')).paddingRight),mask:getComputedStyle(document.querySelector('.lp-body-pane')).webkitMaskImage}));near(end.right,end.bound,'last episode end');
    await p.screenshot({path:__dirname+'/renders/019-'+size[0]+'-'+v+'.png'});await p.close();

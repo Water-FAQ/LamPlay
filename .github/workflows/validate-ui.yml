@@ -17,6 +17,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: node tests/lamplay.test.cjs && node tests/lamplay-providers.cjs && node tests/lamplay-019-logic.cjs
       - run: node tests/lamplay-019-layout.cjs
+      - run: timeout 120 node tests/lamplay-018-regressions.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
