@@ -1,0 +1,65 @@
+const assert=require('assert/strict'),fs=require('fs'),{JSDOM}=require('../node_modules/jsdom');
+const C=require('../lamplay.js');
+global.DOMParser=new JSDOM('').window.DOMParser;
+const A='a'.repeat(32),B='b'.repeat(32),D='d'.repeat(32),E='e'.repeat(32);
+const encode=s=>Buffer.from(s.slice(16)).toString('base64').split('').reverse().join('')+Buffer.from(s.slice(0,16)).toString('base64').split('').reverse().join('');
+const row={id:'serial-1',type:'anime-serial',shikimori_id:53446,title:'Anime',year:2026,translation:{id:1,title:'Voice'},seasons:{1:{episodes:{1:'//player.test/seria/1/h'}}}};
+const movie={name:'Anime',original_name:'Anime Original',first_air_date:'2026-01-01',shikimori_id:53446};
+const search=p=>new Promise((ok,fail)=>p.search('Anime',movie,ok,fail));
+function harness(values,reply){
+ const calls=[],state=Object.assign({},values);let epoch=0;
+ const io={epoch:()=>epoch,clear:()=>epoch++,request:(u,d,t,ok,fail,extra)=>{const call={u,d,t,extra};calls.push(call);reply(call,ok,fail);}};
+ const make=()=>new C.Kodik(io,(k,f)=>Object.hasOwn(state,k)?state[k]:f,(k,v)=>state[k]=v);
+ return {calls,state,io,make,p:make()};
+}
+const valid=(q,ok)=>ok({total:1,results:[row]});
+const denied=ok=>ok({error:'Отсутствует или неверный токен'});
+const candidates=(q,ok)=>ok({stable:[{tokn:encode(D)}],unstable:[{tokn:encode(E)}]});
+const player=(q,ok)=>ok(q.u.includes('add-players')?'token="'+A+'"':{allowed:1,link:'//player.test/serial/1/h/720p'});
+(async()=>{
+ let h=harness({kodik_token:A,kodik_auto_token:B},valid);assert.equal((await search(h.p)).length,1);assert.equal(h.calls.length,1);assert.equal(h.calls[0].d.token,A);assert.equal(h.calls[0].d.shikimori_id,53446);assert.equal(h.calls[0].extra.type,'POST');assert.equal(h.state.kodik_token_status.state,'valid');assert.equal(h.state.kodik_auto_token,B);
+ console.log('PASS personal token first, POST and ID search, automatic key never overwrites personal');
+ h=harness({kodik_token:A,kodik_auto_token:B},(q,ok)=>q.d.token===A?denied(ok):valid(q,ok));await search(h.p);assert.deepEqual(h.calls.map(q=>q.d.token),[A,B]);assert.equal(h.state.kodik_token_status.state,'rejected');assert.equal(h.state.kodik_token,A);
+ console.log('PASS rejected personal token falls through to saved automatic key');
+ h=harness({kodik_auto_token:B},(q,ok)=>q.u.includes('tokens.json')?candidates(q,ok):q.d.token===B?denied(ok):valid(q,ok));await search(h.p);assert.equal(h.state.kodik_auto_token,D);assert.equal(h.calls.filter(q=>q.u.includes('tokens.json')).length,1);assert.ok(h.calls.some(q=>q.u.endsWith('/list')));let before=h.calls.length;await search(h.make());assert.equal(h.calls.length,before+1);assert.equal(h.calls.at(-1).d.token,D);
+ console.log('PASS rejected saved key refreshes list, verifies capabilities and persists across instances');
+ h=harness({},(q,ok)=>q.u.includes('tokens.json')?candidates(q,ok):valid(q,ok));await search(h.p);assert.equal(h.state.kodik_auto_token,D);assert.ok(!h.calls.some(q=>q.d?.token===E));
+ console.log('PASS stable candidate accepted before unstable');
+ const nativeTimer=global.setTimeout,delays=[];global.setTimeout=(fn,ms,...args)=>{delays.push(ms);return nativeTimer(fn,ms===2000?1:ms,...args)};
+ try{h=harness({},(q,ok)=>q.u.includes('tokens.json')?candidates(q,ok):q.d.token===D?denied(ok):valid(q,ok));await search(h.p);assert.equal(h.state.kodik_auto_token,E);assert.ok(delays.includes(2000));}finally{global.setTimeout=nativeTimer;}
+ console.log('PASS rejected stable candidate waits two seconds before trying unstable');
+ h=harness({kodik_token:A,kodik_auto_token:B,kodik_search:'api'},(q,ok,fail)=>fail(new Error('Network')));await assert.rejects(search(h.p));assert.equal(h.calls.length,1);assert.equal(h.state.kodik_token_status.state,'network');assert.equal(h.state.kodik_auto_token,B);
+ console.log('PASS network failure never invalidates cached tokens or starts token enumeration');
+ h=harness({kodik_token:A},(q,ok)=>q.u.endsWith('/search')?ok({total:0,results:[]}):player(q,ok));assert.equal((await search(h.p))[0].widget,true);assert.equal(h.state.kodik_token_status.state,'valid');assert.ok(!h.calls.some(q=>q.u.includes('tokens.json')));
+ console.log('PASS empty API results use player fallback without rejecting valid key');
+ h=harness({kodik_search:'player',kodik_token:A},player);assert.equal((await search(h.p))[0].widget,true);assert.ok(!h.calls.some(q=>q.u.endsWith('/search')||q.u.includes('tokens.json')));
+ console.log('PASS explicit player mode bypasses full API and personal key');
+ h=harness({kodik_search:'api',kodik_token:A},(q,ok)=>ok({total:0,results:[]}));assert.equal((await search(h.p)).length,0);assert.ok(!h.calls.some(q=>q.u.includes('/get-player')));
+ console.log('PASS explicit API mode does not silently use player');
+ h=harness({kodik_auto_token:B},valid);await new Promise((ok,fail)=>h.p.search('Manual query',movie,ok,fail));assert.equal(h.calls[0].d.title,'Manual query');assert.ok(!h.calls[0].d.shikimori_id);
+ console.log('PASS manual search is not replaced with the original movie ID');
+ let reject=false;h=harness({},(q,ok)=>q.u.includes('tokens.json')?ok({stable:[{tokn:encode(reject?E:D)}]}):reject&&q.d.token===D?denied(ok):valid(q,ok));await search(h.p);reject=true;await search(h.p);assert.equal(h.state.kodik_auto_token,E);assert.equal(h.calls.filter(q=>q.u.includes('tokens.json')).length,2);
+ console.log('PASS expired discovered token reloads the current upstream list in the same screen');
+ let delayed,finished=false;h=harness({},(q,ok)=>q.u.includes('tokens.json')?candidates(q,ok):denied(ok));
+ global.setTimeout=(fn,ms)=>{assert.equal(ms,2000);delayed=fn;return 0;};
+ try{h.p.search('Anime',movie,()=>finished=true,()=>finished=true);const n=h.calls.length;h.io.clear();delayed();assert.equal(h.calls.length,n);assert.equal(finished,false);}finally{global.setTimeout=nativeTimer;}
+ console.log('PASS cancel during token retry pause prevents further requests and callbacks');
+ const catalog=(season,count,id)=>`<select><option value="${season}" data-serial-id="${id}" data-serial-hash="h" selected>${season}</option></select><select><option value="1" data-media-id="${id}" data-media-hash="h" data-media-type="serial">Voice</option></select><div class="series-options"><div class="season-${season}">${Array.from({length:count},(_,i)=>`<option value="${i+1}" data-id="${id}-${i+1}" data-hash="h">${i+1}</option>`).join('')}</div></div>`;
+ h=harness({},(q,ok)=>q.u.includes('add-players')?player(q,ok):q.u.includes('/get-player?')?ok({allowed:1,link:'https://player.test/serial/two/h/720p'}):ok(catalog(q.u.includes('/two/')?2:1,q.u.includes('/two/')?12:25,q.u.includes('/two/')?'two':'one')));
+ const release={id:'shiki:1',title:'Anime',lookup:'Anime',movie:{original_name:'Anime'},series:true,playerURL:'https://player.test/serial/one/h/720p',voices:[{id:1,title:'Voice',rows:[row]}],context:{seasons:[{season_number:1,air_date:'2013-01-01'},{season_number:2,air_date:'2017-01-01'}],episodes:{2:Array.from({length:12},()=>({air_date:'2017-01-01'}))}}};
+ const recovered=await new Promise((ok,fail)=>h.p.episodes(release,release.voices[0],ok,fail,'2'));assert.equal(recovered.length,12);assert.ok(recovered.every(ep=>String(ep.season)==='2'&&ep.url.includes('/two-')));
+ console.log('PASS API release missing a separate season reuses existing player discovery');
+ const dom=new JSDOM('<body></body>',{url:'http://lampa.test',runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;
+ w.eval(fs.readFileSync(require.resolve('../node_modules/jquery/dist/jquery.js'),'utf8'));w.eval(fs.readFileSync(__dirname+'/fixtures/lampa-mock.js','utf8'));
+ w.eval(fs.readFileSync(__dirname+'/../lamplay.js','utf8'));const item=w.jQuery('<div><div class="settings-param__name">Свой API-токен</div><div class="settings-param__descr"></div></div>').appendTo('body'),param=w.mock.parameter('kodik_token');param.onRender(item);
+ assert.equal(item.find('.lp-kodik-token-dot').length,0);assert.match(item.text(),/подобран автоматически/);
+ const Req=w.Lampa.Reguest;let response={results:[row]},network=false;
+ w.Lampa.Reguest=function(){const r=new Req();r.native=r.silent=(u,ok,fail)=>w.setTimeout(()=>network?fail({status:0},'error'):ok(u.includes('tokens.json')?{stable:[],unstable:[]}:response),1);return r;};
+ w.mock.set('kodik_token',A);param.onChange();assert.match(item.text(),/Проверка еще/);
+ const check=()=>{w.mock.parameter('kodik_check').onChange();return new Promise(r=>nativeTimer(r,80));};
+ await check();assert.ok(item.find('.lp-kodik-token-dot').hasClass('lp-auth-confirmed'));assert.match(item.text(),/действителен/);
+ response={error:'Отсутствует или неверный токен'};await check();assert.equal(item.find('.lp-kodik-token-dot').length,1);assert.equal(item.find('.lp-kodik-token-dot').hasClass('lp-auth-confirmed'),false);assert.match(item.text(),/API отклонил/);
+ network=true;await check();assert.equal(item.find('.lp-kodik-token-dot').length,0);assert.match(item.text(),/Не удалось проверить/);assert.equal(w.mock.notices.length,0);
+ w.mock.set('kodik_token','');param.onChange();assert.match(item.text(),/подобран автоматически/);assert.equal(item.find('.lp-kodik-token-dot').length,0);dom.window.close();
+ console.log('PASS settings indicator, dynamic descriptions, edits, blank field and silent switching');
+})().catch(e=>{console.error(e);process.exitCode=1});

@@ -1,13 +1,13 @@
 name: Validate LamPlay UI
 on:
   push:
-    branches: [fix/0.19-layout]
+    branches: [main, 'fix/**']
 permissions:
   contents: read
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,6 +18,7 @@ jobs:
       - run: node tests/lamplay.test.cjs && node tests/lamplay-providers.cjs && node tests/lamplay-019-logic.cjs
       - run: node tests/lamplay-020-layout.cjs
       - run: node tests/lamplay-020-logic.cjs
+      - run: npm run test:021
       - uses: actions/upload-artifact@v4
         if: always()
         with:

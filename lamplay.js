@@ -1,10 +1,10 @@
-/* LamPlay by WaterFAQ - 0.20.0 (experimental)
+/* LamPlay by WaterFAQ - 0.21.0 (experimental)
  * Independent Lampa plugin. Direct connections only; no proxy or remote code execution.
  * Providers: HDrezka, Kodik, AniLiberty, Filmix, CDNvideohub, KinoTochka, VeoVeo.
  */
 (function (root) {
     'use strict';
-    var VERSION = '0.20.0';
+    var VERSION = '0.21.0';
     var RELEASE_DATE = '08.11.2026';
     var KEY = 'lamplay';
     var NAME = 'LamPlay';
@@ -349,7 +349,8 @@
                 var message = reason === 'timeout' ? 'Источник не ответил вовремя.' : status ? 'Источник вернул HTTP ' + status + '.' :
                     'Не удалось прочитать ответ '+origin(url)+'. Браузер мог заблокировать запрос, либо сайт недоступен. Проверьте доступность источника и зеркало.';
                 if(!status && /(?:rezka|hdrezka)\./i.test(origin(url)))message+=' HDrezka: смена пароля не устранит сетевой отказ. В обычном браузере также требуются разрешённые межсайтовые запросы и cookies; проверьте другое зеркало.';
-                end(new Error(message));
+                var error = new Error(message); error.httpStatus = status || 0;
+                end(error);
             }, data ? form(data) : false, params);
         };
     }
@@ -529,34 +530,99 @@
         return {voices:voices,seasons:seasons,episodes:episodes,currentSeason:currentSeason};
     }
 
-    function Kodik(io, settings) {
+    function Kodik(io, settings, save, statusChanged) {
         this.id = 'kodik'; this.title = 'Kodik';
+        save = save || function () {};
+        statusChanged = statusChanged || function () {};
         var publicToken = '', endpointCache = {},widgetPending={},widgetDiscoveries={};
+        var rejected = {}, candidates = null, candidateHost = '', discoveryFailedUntil = 0;
+        function base() { return hostSetting(settings('kodik_host', ''), 'https://kodik-api.com'); }
+        function current() { return io.epoch ? io.epoch() : 0; }
+        function personalStatus(value, state) {
+            if (value !== String(settings('kodik_token', '') || '').trim()) return;
+            save('kodik_token_status', { token:value, host:base(), state:state });
+            statusChanged();
+        }
+        function authError(response) {
+            return !!(response && typeof response.error === 'string' && /(?:Отсутствует или неверный токен|invalid[ _-]*token|token[^.]*invalid|токен[^.]*невер|невер[^.]*токен)/i.test(response.error));
+        }
+        function raw(value, endpoint, params, done, fail) {
+            io.request(base() + '/' + endpoint, Object.assign({},params,{token:value}), 'json', function (response) {
+                if (authError(response)) { var e=new Error('Kodik: API отклонил токен.');e.kodikAuth=true;return fail(e); }
+                if (response && response.error) return fail(new Error('Kodik: ошибка API. Повторите запрос позже.'));
+                if (!response || (endpoint!=='get-player' && !Array.isArray(response.results))) return fail(new Error('Kodik: неожиданный ответ API.'));
+                done(response);
+            }, function (e) { if (e.httpStatus===401)e.kodikAuth=true;fail(e); }, {type:'POST'});
+        }
+        // Adapted from AnimeParsers KodikParser.get_token / validate_token (MIT).
+        // Keep stable -> unstable, reverse/base64 decoding and the two-second retry interval.
+        // Validate the endpoints used by the plugin; legacy keys remain a separate player path.
+        function validate(value, done, fail) {
+            var checks=[['search',{title:'Кулинарные скитания',limit:1}],['search',{shikimori_id:'53446',limit:1}],['list',{limit:1}]],index=0;
+            function next(){if(index===checks.length)return done(value);var c=checks[index++];raw(value,c[0],c[1],next,fail);}next();
+        }
+        function decodeCandidate(value) {
+            if(typeof value!=='string' || !value.length || value.length%2)return '';
+            var half=value.length/2;
+            try { return b64(value.slice(half).split('').reverse().join(''))+b64(value.slice(0,half).split('').reverse().join('')); }
+            catch(e){return '';}
+        }
+        function withToken(done, fail) {
+            var ticket=current(),host=base(),seen={},queue=[],auto=String(settings('kodik_auto_token','') || ''),personal=String(settings('kodik_token','') || '').trim();
+            function active(){return ticket===current() && host===base();}
+            function add(value,kind){if(value && !seen[value]){seen[value]=true;queue.push({value:value,kind:kind});}}
+            add(personal,'personal');add(auto,'auto');
+            function useList(){
+                if(!active())return;
+                if(candidates && candidateHost===host){candidates.forEach(function(v){add(v,'candidate');});return next();}
+                if(Date.now()<discoveryFailedUntil)return fail(new Error('Kodik: полноценный API временно недоступен.'));
+                io.request('https://raw.githubusercontent.com/YaNesyTortiK/AnimeParsers/refs/heads/main/kdk_tokns/tokens.json',null,'json',function(data){
+                    if(!active())return;candidates=[];candidateHost=host;
+                    ['stable','unstable'].forEach(function(kind){list(data && data[kind]).forEach(function(entry){var v=decodeCandidate(entry.tokn);if(v && candidates.indexOf(v)<0)candidates.push(v);});});
+                    candidates.forEach(function(v){add(v,'candidate');});next();
+                },function(e){discoveryFailedUntil=Date.now()+30000;fail(e);});
+            }
+            var listed=false;
+            function next(){
+                if(!active())return;
+                if(!queue.length){if(!listed){listed=true;return useList();}discoveryFailedUntil=Date.now()+30000;return fail(new Error('Kodik: не найден рабочий токен API.'));}
+                var entry=queue.shift(),value=entry.value;
+                if(rejected[host+'|'+value]>Date.now())return next();
+                done(value,function(e){
+                    if(!active())return;
+                    if(entry.kind==='personal')personalStatus(value,e.kodikAuth?'rejected':'network');
+                    if(!e.kodikAuth)return fail(e);
+                    rejected[host+'|'+value]=Date.now()+300000;
+                    if(String(settings('kodik_auto_token','') || '')===value){save('kodik_auto_token','');candidates=null;}
+                    if(entry.kind==='candidate')root.setTimeout(function(){if(active())next();},2000);else next();
+                },function(){
+                    if(entry.kind==='personal')personalStatus(value,'valid');
+                    else save('kodik_auto_token',value);
+                },entry.kind==='candidate');
+            }next();
+        }
+        this.checkAccess=function(done,fail){
+            rejected={};candidates=null;discoveryFailedUntil=0;
+            withToken(function(value,retry,accept){validate(value,function(){accept();done();},retry);},fail);
+        };
         function token(done, fail) {
-            var saved = String(settings('kodik_token', '') || '').trim();
-            if (saved || publicToken) return done(saved || publicToken);
+            if (publicToken) return done(publicToken);
             /* Read the provider's public integration script as text; never execute it.
                No key from nb557 or another third-party plugin is bundled. */
             io.request('https://kodik-add.com/add-players.min.js', null, 'text', function (script) {
                 var match = script.match(/\btoken\s*[:=]\s*['"]([a-z0-9]{16,128})['"]/i) ||
                     script.match(/[?&]token=([a-z0-9]{16,128})/i);
-                if (!match) return fail(new Error('Kodik: публичный API-токен не найден. Укажите свой токен в настройках плагина.'));
+                if (!match) return fail(new Error('Kodik: не найден токен поиска через плеер.'));
                 publicToken = match[1]; done(publicToken);
-            }, function () { fail(new Error('Kodik: не удалось получить публичный API-токен напрямую. Можно указать свой в настройках.')); });
+            }, function () { fail(new Error('Kodik: поиск через плеер временно недоступен.')); });
         }
         function api(params, done, fail) {
-            token(function (value) {
-                params.token = value; params.limit = 100; params.with_episodes = true;
-                var base = hostSetting(settings('kodik_host', ''), 'https://kodik-api.com');
-                io.request(base + '/search?' + form(params), null, 'json', function (response) {
-                    if (response && response.error) return fail(new Error('Kodik отклонил API-запрос. Проверьте токен и адрес API.'));
-                    if (!response || !Array.isArray(response.results)) return fail(new Error('Kodik: неожиданный ответ API.'));
-                    done(response.results);
-                }, fail);
+            withToken(function(value,retry,accept,isCandidate){
+                function search(){raw(value,'search',Object.assign({limit:100,with_episodes:true,with_seasons:true},params),function(response){accept();done(response.results);},retry);}
+                if(isCandidate)validate(value,search,retry);else search();
             }, fail);
         }
-        this.search = function (query, movie, done, fail) {
-            if (!String(settings('kodik_token', '') || '').trim()) {
+        function playerSearch(query, movie, done, fail) {
                 return token(function (value) {
                     var year=String(movie.release_date || movie.first_air_date || '').slice(0,4),attempts=[],seen={};
                     function add(fields){var key=form(fields);if(!seen[key]){seen[key]=true;attempts.push(fields);}}
@@ -564,7 +630,7 @@
                     if([movie.title,movie.name,movie.original_title,movie.original_name].some(function(n){return n && sameTitle(n,query);}))names=names.concat([movie.original_name,movie.original_title,movie.name,movie.title]);
                     names.filter(Boolean).forEach(function(name){if(/^\d{4}$/.test(year))add({title:name,year:year});});names.filter(Boolean).forEach(function(name){add({title:name});});
                     // IDs avoid transliteration differences without changing manually entered searches.
-                    if(names.length>1){if(movie.shikimori_id)add({shikimori_id:movie.shikimori_id});if(movie.imdb_id)add({imdb_id:movie.imdb_id});if(movie.kinopoisk_id)add({kinopoisk_id:movie.kinopoisk_id});}
+                    if(names.length>1){if(movie.shikimori_id)add({shikimoriID:movie.shikimori_id});if(movie.imdb_id)add({imdbID:movie.imdb_id});if(movie.kinopoisk_id)add({kinopoiskID:movie.kinopoisk_id});}
                     function attempt(){
                         if(!attempts.length)return done([]);
                         var fields=attempts.shift(),params=Object.assign({token:value,hasPlayer:false,url:root.location && root.location.href || 'http://lampa.mx/'},fields);
@@ -577,11 +643,22 @@
                         },fail);
                     }attempt();
                 }, fail);
-            }
-            var params = { title: query };
-            api(params, function (rows) { done(rank(kodikResults(rows), movie)); }, fail);
+        }
+        this.search = function (query, movie, done, fail) {
+            var mode=settings('kodik_search','auto');
+            if(mode==='player')return playerSearch(query,movie,done,fail);
+            var attempts=[],names=[query],seen={},matching=[movie.title,movie.name,movie.original_title,movie.original_name].some(function(n){return n && sameTitle(n,query);});
+            function add(p){var key=form(p);if(!seen[key]){seen[key]=true;attempts.push(p);}}
+            if(matching){['shikimori_id','kinopoisk_id','imdb_id'].forEach(function(k){if(movie[k]){var p={};p[k]=movie[k];add(p);}});names=names.concat([movie.original_name,movie.original_title]);}
+            names.filter(Boolean).forEach(function(n){add({title:n});});
+            function fallback(e){if(mode==='api'){if(e)return fail(e);return done([]);}playerSearch(query,movie,done,fail);}
+            function next(){if(!attempts.length)return fallback();api(attempts.shift(),function(rows){
+                var serial=!!(movie.name || movie.first_air_date || movie.media_type==='tv');
+                rows=rows.filter(function(r){return !r.type || /serial/.test(r.type)===serial;});
+                if(!rows.length)return next();var results=rank(kodikResults(rows),movie);results.forEach(function(r){r.movie=movie;});done(results);
+            },fallback);}next();
         };
-        this.open = function (result, done, fail) {
+        this.open = function openResult(result, done, fail) {
             if (result.widget) {
                 return io.request(result.url, null, 'text', function (html) {
                     try {
@@ -606,10 +683,14 @@
                     voices.push({ id: id, title: entry.translation && entry.translation.title || 'Оригинал',
                         rows: grouped.rows.filter(function (r) { return String(r.translation && r.translation.id || r.id) === id; }) });
                 });
-                done({ id: result.id, title: result.title, voices: voices, series: grouped.rows.some(function (r) { return Object.keys(r.seasons || {}).length > 0; }) });
-            }, fail);
+                done({ id: result.id, title: result.title, voices: voices, movie:result.movie || {},lookup:result.movie && (result.movie.original_name || result.movie.original_title) || result.title,
+                    playerURL:absolute(grouped.rows[0].link,'https://kodikplayer.com'),series: grouped.rows.some(function (r) { return Object.keys(r.seasons || {}).length > 0; }) });
+            }, function(e){
+                if(settings('kodik_search','auto')!=='auto')return fail(e);
+                playerSearch(result.title,result.movie || {},function(rows){if(!rows.length)return fail(e);openResult(rows[0],done,fail);},fail);
+            });
         };
-        this.episodes = function (release, voice, done, fail, selectedSeason) {
+        this.episodes = function readEpisodes(release, voice, done, fail, selectedSeason) {
             if (release.widget) {
                 function readPage(url,callback,onError){
                     onError=onError || fail;if(release.pages[url])return callback(release.pages[url]);var pendingKey=release.id+'|'+(io.epoch?io.epoch():0)+'|'+url;var pendingPages=widgetPending;
@@ -678,6 +759,24 @@
                 if (!Object.keys(seasons).length && row.link) episodes.push({ season: '', number: '', title: release.title,
                     url: absolute(row.link, 'https://kodikplayer.com'), voice: voice });
             });
+            // Full API records may contain only one separately published anime season/part.
+            // Reuse the existing player discovery instead of losing seasons when enabling API search.
+            var known=release.context && (release.context.episodes || {})[String(selectedSeason)] || [];
+            var expected=known.filter(function(ep){return ep.air_date && Date.parse(ep.air_date)<=Date.now();}).length;
+            var actual=episodes.filter(function(ep){return String(ep.season)===String(selectedSeason);}).length;
+            if(settings('kodik_search','auto')==='auto' && release.series && selectedSeason && release.playerURL && (!actual || expected>actual)){
+                function supplement(widget){
+                    release.playerFallback=widget;widget.context=release.context;
+                    var v=widget.voices.filter(function(v){return String(v.id)===String(voice.id);})[0] || {id:voice.id,title:voice.title};
+                    readEpisodes(widget,v,function(rows){done(rows.length?rows:episodes);},function(e){if(actual)done(episodes);else fail(e);},selectedSeason);
+                }
+                if(release.playerFallback)return supplement(release.playerFallback);
+                return io.request(release.playerURL,null,'text',function(html){
+                    try{var catalog=kodikCatalog(html,release.playerURL,voice.title),pages={};pages[release.playerURL]=catalog;
+                        supplement({id:release.playerURL,title:release.title,lookup:release.lookup,movie:release.movie,widget:true,initial:catalog,voices:catalog.voices,pages:pages,discoveries:{}});
+                    }catch(e){if(actual)done(episodes);else fail(e);}
+                },function(e){if(actual)done(episodes);else fail(e);});
+            }
             done(episodes);
         };
         this.resolve = function (release, episode, done, fail) {
@@ -1081,7 +1180,7 @@
         if(!flag(setting('migrated_050_source',false))) {if(!setting('source','') || setting('source','')==='kodik') save('source','rezka');save('migrated_050_source',true);}
         if(setting('source','rezka')==='animedia')save('source','rezka');
         function buildProviders(io) {
-            return [new Rezka(io, setting, new RezkaSession(io, setting, save, Lampa)), new Kodik(io, setting), new Libria(io, setting), new Filmix(io, setting), new CDNVideoHub(io,setting), new KinoTochka(io, setting), new VeoVeo(io,setting)];
+            return [new Rezka(io, setting, new RezkaSession(io, setting, save, Lampa)), new Kodik(io, setting, save, updateKodikStatus), new Libria(io, setting), new Filmix(io, setting), new CDNVideoHub(io,setting), new KinoTochka(io, setting), new VeoVeo(io,setting)];
         }
         function saveResume(key, value) {
             var all=object(setting('resume',{})),updated={};
@@ -1368,13 +1467,15 @@
                 });
                 if(series() && v==='vertical'){var gutter=parseFloat(root.getComputedStyle(html[0]).fontSize)*.65;bodyPane.css({'margin-left':-gutter+'px',width:'calc(100% + '+(gutter*2)+'px)','padding-left':gutter+'px','padding-right':gutter+'px'});}
                 if(sideways){
-                    var box=bodyPane[0].getBoundingClientRect(),style=root.getComputedStyle(bodyPane[0]),left=box.left-bounds.left,right=bounds.right-box.right;
-                    bodyPane.css({'margin-left':-left+'px',width:bounds.width+'px','padding-left':Math.max(0,left)+'px','padding-right':Math.max(0,right)+'px'});
+                    // Content uses the panel's two guide lines; the scrolling mask stays at screen edges.
+                    var box=bodyPane[0].getBoundingClientRect(),panelBox=panel[0].getBoundingClientRect(),panelStyle=root.getComputedStyle(panel[0]);
+                    var left=panelBox.left+parseFloat(panelStyle.paddingLeft)-bounds.left,right=bounds.right-panelBox.right+parseFloat(panelStyle.paddingRight);
+                    bodyPane.css({'margin-left':(bounds.left-box.left)+'px',width:bounds.width+'px','padding-left':Math.max(0,left)+'px','padding-right':Math.max(0,right)+'px'});
                 }
                 // Keep the resume row clear of the first season caption without compacting filters.
                 if(series() && v==='card'){
                     var resumeRow=hero.find('.lp-resume-row')[0],seasonCaption=filters.find('.lp-caption')[0];
-                    if(resumeRow && seasonCaption){var resumeBox=resumeRow.getBoundingClientRect(),baseFont=parseFloat(root.getComputedStyle(html[0]).fontSize),resumeBottom=Math.max(resumeBox.bottom,resumeBox.top+baseFont*(.9*2.65)),clearance=resumeBottom+baseFont*.35-seasonCaption.getBoundingClientRect().top;if(clearance>0)hero.css('margin-bottom',Math.ceil(clearance)+'px');}
+                    if(resumeRow && seasonCaption){var resumeBox=resumeRow.getBoundingClientRect(),baseFont=parseFloat(root.getComputedStyle(html[0]).fontSize),resumeBottom=Math.max(resumeBox.bottom,resumeBox.top+baseFont*(.9*2.8)),clearance=resumeBottom+baseFont*.35-seasonCaption.getBoundingClientRect().top;if(clearance>0)hero.css('margin-bottom',Math.ceil(clearance)+'px');}
                 }
                 if(!series())bodyPane.css('padding-bottom',root.getComputedStyle(body[0]).rowGap);
                 html.find('.lp-strip,.lp-tools').each(function(){if($(this).hasClass('lp-strip') || !listLayout())edgeFade(this,true);});
@@ -1574,7 +1675,7 @@
                     var seasons=seasonList();if (seasons.indexOf(season)<0) season=seasons[0] || '';
                     prepareEpisodes();
                 },failed,season);}
-                if(source.id==='kodik' && release.widget){var ticket=generation,started=Date.now();function ready(){if(destroyed || ticket!==generation)return;if(metadataPending && Date.now()-started<3000){presentationTimer=setTimeout(ready,30);return;}var s=season || release.initial.currentSeason;release.context={seasons:metadata.details.seasons || [],episodes:metadata.seasons};loadSeasonMetadata(s,requestEpisodes);}ready();}else requestEpisodes();
+                if(source.id==='kodik'){var ticket=generation,started=Date.now();function ready(){if(destroyed || ticket!==generation)return;if(metadataPending && Date.now()-started<3000){presentationTimer=setTimeout(ready,30);return;}var s=season || release.initial && release.initial.currentSeason || '1';release.context={seasons:metadata.details.seasons || [],episodes:metadata.seasons};loadSeasonMetadata(s,requestEpisodes);}ready();}else requestEpisodes();
             }
             function prepareEpisodes(){
                 var ticket=generation,started=Date.now(),ended=false,assetsStarted=false;
@@ -2855,8 +2956,37 @@
         param('prefer_mp4', 'trigger', 'Предпочитать поток MP4', true, undefined, '', rezkaMenu);
         param('rezka_fix_stream', 'trigger', 'Фиксация видеопотока', false, undefined,
             'Автоматически корректировать домен видеопотока для Voidboost / Ukrtelcdn.', rezkaMenu);
-        param('kodik_host', 'input', 'Адрес API', 'https://kodik-api.com', '', '', kodikMenu);
-        param('kodik_token', 'input', 'Свой API-токен', '', '', 'Пусто - подбор через get-player. Свой токен включает поиск через API.', kodikMenu);
+        var kodikStatusItem=null,kodikAccessItem=null,kodikCheckIo=new Transport(Lampa,setting),kodikCheckBusy=false;
+        function kodikAccessText(value){
+            if(value!==undefined)save('kodik_access_status',value);
+            if(kodikAccessItem){var node=kodikAccessItem.find('.settings-param__descr');if(!node.length)node=$('<div class="settings-param__descr"></div>').appendTo(kodikAccessItem);node.text(value===undefined?setting('kodik_access_status','Проверить доступ к полноценному API.'):value);}
+        }
+        function kodikTokenDescription(){
+            var value=String(setting('kodik_token','') || '').trim(),s=setting('kodik_token_status',{});
+            if(!value)return {text:'Токен будет подобран автоматически.',state:''};
+            if(!s || s.token!==value || s.host!==hostSetting(setting('kodik_host',''),'https://kodik-api.com'))return {text:'Личный токен используется в первую очередь. Проверка еще не выполнена.',state:''};
+            if(s.state==='valid')return {text:'Личный токен действителен и используется для поиска через API.',state:'valid'};
+            if(s.state==='rejected')return {text:'API отклонил личный токен. Используется автоматический подбор.',state:'rejected'};
+            return {text:'Не удалось проверить личный токен. Проверка повторится при следующем обращении.',state:''};
+        }
+        function updateKodikStatus(){
+            if(!kodikStatusItem)return;var state=kodikTokenDescription(),name=kodikStatusItem.find('.settings-param__name');
+            name.find('.lp-kodik-token-dot').remove();
+            if(state.state)name.append($('<span class="lp-auth-dot lp-kodik-token-dot"></span>').toggleClass('lp-auth-confirmed',state.state==='valid').attr('aria-label',state.state==='valid'?'Токен действителен':'Токен отклонен'));
+            var description=kodikStatusItem.find('.settings-param__descr');
+            if(!description.length)description=$('<div class="settings-param__descr"></div>').appendTo(kodikStatusItem);
+            description.text(state.text);
+        }
+        function resetKodikStatus(){kodikCheckIo.clear();kodikCheckBusy=false;save('kodik_token_status',{});kodikAccessText('Проверка еще не выполнена.');updateKodikStatus();}
+        param('kodik_search','select','Способ поиска','auto',{auto:'Автоматически',api:'Через API',player:'Через плеер'},'Автоматически: сначала API, при недоступности или пустом результате - поиск через плеер.',kodikMenu);
+        param('kodik_host', 'input', 'Адрес API', 'https://kodik-api.com', '', '', kodikMenu,resetKodikStatus);
+        Lampa.SettingsApi.addParam({component:kodikMenu,param:{name:KEY+'_kodik_token',type:'input',default:'',values:'',placeholder:'Не задано'},
+            field:{name:'Свой API-токен',description:kodikTokenDescription().text},onChange:resetKodikStatus,onRender:function(item){kodikStatusItem=item;updateKodikStatus();}});
+        buttonParam(kodikMenu,'kodik_check','Проверить доступ',function(){
+            if(kodikCheckBusy)return;kodikCheckBusy=true;kodikAccessText('Проверяем доступ к API…');
+            var provider=new Kodik(kodikCheckIo,setting,save,updateKodikStatus);
+            provider.checkAccess(function(){kodikCheckBusy=false;kodikAccessText('Полноценный API доступен.');updateKodikStatus();},function(){kodikCheckBusy=false;kodikAccessText('Не удалось подтвердить доступ к API. Повторите проверку позже.');updateKodikStatus();});
+        },'Проверить доступ к полноценному API.',function(item){kodikAccessItem=item;kodikAccessText();});
         param('libria_host', 'input', 'Адрес API', 'https://aniliberty.top', '', '', libriaMenu);
         var filmixStatusItem=null,filmixTokenItem=null;
         function filmixStatus(profile){
@@ -3038,11 +3168,13 @@
             if (event.name === rezkaMenu) updateAuthStatus();
         });
         Lampa.Settings.listener.follow('close', function () {
+            kodikCheckIo.clear();if(kodikCheckBusy)kodikAccessText('Проверка прервана.');kodikCheckBusy=false;
             if (settingsObserver) { settingsObserver.disconnect(); settingsObserver = null; }
         });
         $('<style id="lamplay-019-style"></style>').text("\n.lamplay.lp-series{--lp-inset:.9em;--lp-column:32%;--lp-caption-gap:.5em}\n.lamplay.lp-series .lp-panel{padding-left:var(--lp-inset);padding-right:var(--lp-inset);gap:var(--lp-inset)}\n.lamplay.lp-series .lp-strip,.lamplay.lp-series .lp-tools{padding:0;overflow-x:auto;overflow-y:hidden;scroll-padding:.18em}\n.lamplay.lp-series .lp-strip-group{min-width:0}\n.lamplay.lp-series .lp-caption{margin-bottom:var(--lp-caption-gap)}\n.lamplay.lp-series .lp-count-control{display:flex;flex-direction:column;align-items:flex-start;gap:.2em;height:auto;min-height:3.4em}\n.lamplay.lp-series .lp-strip .lamplay__control{box-sizing:border-box;border:0;outline:none}.lamplay.lp-series .lp-strip .lamplay__control.focus{box-shadow:inset 0 0 0 2px #fff}\n.lp-count{font-size:.76em;line-height:1.2;min-height:1.2em;opacity:.8}\n.lamplay.lp-series[data-view=vertical] .lp-side{width:var(--lp-column);padding:0}\n.lamplay.lp-series[data-view=vertical] .lp-side .lp-tools{width:100%;padding:0;overflow:visible}\n.lamplay.lp-series[data-view=vertical] .lp-main{overflow:hidden}\n.lamplay.lp-series[data-view=vertical] .lp-episode.lp-started{box-shadow:inset 0 0 0 1px rgba(255,255,255,.48)}\n.lamplay.lp-series[data-view=vertical] .lp-episode.focus,.lamplay.lp-series[data-view=vertical] .lp-episode:focus{box-shadow:inset 0 0 0 .16em #fff}\n.lamplay.lp-series[data-view=vertical] .lp-body-pane{padding-left:0;padding-right:0}\n.lamplay.lp-series[data-view=vertical] .lp-filters{padding-left:0;padding-right:0}\n.lamplay.lp-series[data-view=vertical] .lp-hero,.lamplay.lp-series[data-view=horizontal] .lp-top>.lp-hero{width:100%;height:auto;aspect-ratio:16/9;min-height:0;max-height:none}\n.lamplay.lp-series[data-view=horizontal] .lp-top{gap:var(--lp-inset);align-items:stretch}\n.lamplay.lp-series[data-view=horizontal] .lp-top>.lp-hero{width:var(--lp-column);flex:none}\n.lamplay.lp-series[data-view=horizontal] .lp-filters{gap:.6em;justify-content:space-between}\n.lamplay.lp-series[data-view=horizontal] .lp-top{min-height:13.5em}\n.lamplay.lp-series[data-view=vertical] .lp-hero,.lamplay.lp-series[data-view=horizontal] .lp-top>.lp-hero{min-height:13.5em}\n.lamplay.lp-series[data-view=card] .lp-hero-content{padding-left:0;padding-right:0}\n.lamplay.lp-series[data-view=card] .lp-filters{gap:.7em;justify-content:flex-start}\n.lamplay.lp-series[data-view=card] .lp-top{gap:.7em}\n.lamplay.lp-series[data-view=horizontal] .lp-episode,.lamplay.lp-series[data-view=card] .lp-episode{padding-left:0;padding-right:0;min-width:0}\n.lamplay.lp-series[data-view=horizontal] .lp-body-pane,.lamplay.lp-series[data-view=card] .lp-body-pane{padding-top:.18em;align-items:flex-start}\n.lamplay.lp-series[data-view=horizontal] .lp-panel,.lamplay.lp-series[data-view=card] .lp-panel{row-gap:.35em}\n.lamplay.lp-series[data-view=horizontal] .lamplay__items,.lamplay.lp-series[data-view=card] .lamplay__items{padding-top:0;padding-bottom:0}\n.lamplay.lp-series[data-view=horizontal] .lp-episode,.lamplay.lp-series[data-view=card] .lp-episode{padding-top:.18em;padding-bottom:.18em}\n.lamplay.lp-series[data-view=horizontal] .lp-episode-info,.lamplay.lp-series[data-view=card] .lp-episode-info{height:7.8em;min-height:7.8em;overflow:hidden}\n.lamplay.lp-series[data-view=card] .lp-top{padding-bottom:.4em}\n.lamplay.lp-series .lp-loader{position:relative;top:auto;left:auto;right:auto;min-height:3px;margin:0;flex:none;z-index:0}\n.lp-series .lp-no-episode-meta .lp-episode-meta{display:none}\n.lp-series .lp-no-episode-meta .lp-episode-info{padding-top:.3em}\n.lamplay__status.lp-empty{background:rgba(35,23,27,.65)}\n@media(max-width:600px){.lamplay.lp-series[data-view=horizontal] .lp-top>.lp-hero,.lamplay.lp-series[data-view=vertical] .lp-side{width:100%}.lamplay.lp-series[data-view=horizontal] .lp-top{min-height:0}}\n").appendTo('head');
         $('<style id="lamplay-018-style"></style>').text("/* Focus changes only decoration, never the geometry or raster scale of episode content. */\n.lamplay.lp-series[data-view] .lp-episode,.lamplay.lp-series[data-view] .lp-episode.focus,.lamplay.lp-series[data-view] .lp-episode:focus,.lamplay.lp-series[data-view] .lp-episode .lp-picture,.lamplay.lp-series[data-view] .lp-episode.focus .lp-picture,.lamplay.lp-series[data-view] .lp-episode:focus .lp-picture{transform:none}\n.lamplay.lp-series[data-view] .lp-episode,.lp-series .lp-picture{transition:background-color .16s ease}\n.lp-series[data-view=horizontal] .lp-episode.focus .lp-picture,.lp-series[data-view=card] .lp-episode.focus .lp-picture,.lp-series[data-view=horizontal] .lp-episode:focus .lp-picture,.lp-series[data-view=card] .lp-episode:focus .lp-picture{outline:.17em solid #fff;outline-offset:0;box-shadow:none}\n.lp-series[data-view=horizontal] .lp-episode.lp-unavailable.focus .lp-picture,.lp-series[data-view=card] .lp-episode.lp-unavailable.focus .lp-picture,.lp-series[data-view=horizontal] .lp-episode.lp-unavailable:focus .lp-picture,.lp-series[data-view=card] .lp-episode.lp-unavailable:focus .lp-picture{outline-color:rgba(255,255,255,.45)}\n.lamplay.lp-series[data-view] .lp-episode .lp-progress i,.lamplay.lp-series[data-view] .lp-episode.focus .lp-progress i,.lamplay.lp-series[data-view] .lp-episode:focus .lp-progress i{background:#fff}\n.lamplay[data-view=results] .lp-main{padding-top:0}\n.lamplay[data-view=results] .lp-main{position:relative}\n.lamplay[data-view=results] .lp-loader{position:absolute;top:0;left:0;right:0;z-index:3}\n.lamplay[data-view=results] .lp-body-pane{padding-top:0}\n.lamplay[data-view=results] .lp-result.focus,.lamplay[data-view=results] .lp-result:focus{background:rgba(255,255,255,.15);color:#fff;border-color:transparent;outline:none;box-shadow:inset 0 0 0 2px rgba(255,255,255,.75)}\n.lamplay[data-view=results] .lp-result.focus .lamplay__item-detail,.lamplay[data-view=results] .lp-result:focus .lamplay__item-detail{color:rgba(255,255,255,.8)}\n").appendTo('head');
         $('<style id="lamplay-020-style"></style>').text("\n.lamplay{--lp-inset:.9em;--lp-column:32%;--lp-caption-gap:.5em}\n.lamplay[data-view=results] .lp-panel{padding-left:var(--lp-inset);padding-right:var(--lp-inset);gap:var(--lp-inset)}\n.lamplay[data-view=results] .lp-side{width:var(--lp-column);padding:0;gap:.65em}\n.lamplay[data-view=results] .lp-side .lp-tools{width:100%;padding:0;gap:.4em}\n.lamplay[data-view=results] .lp-hero{height:auto;aspect-ratio:16/9;min-height:13.5em;max-height:none}\n.lamplay[data-view=results] .lp-title-slot{width:100%;max-width:100%;justify-content:center}\n.lamplay[data-view=results] .lp-title-logo{transform:scale(.7);transform-origin:center;object-position:center}\n.lamplay[data-view=results] .lp-body-pane{padding-left:0;padding-right:0}\n.lamplay .lamplay__control,.lamplay .lp-continue{display:flex;align-items:center;justify-content:flex-start;box-sizing:border-box;line-height:1.2;min-height:2.8em;padding:.55em .8em;border:0}\n.lamplay .lp-continue{border:1px solid rgba(255,255,255,.65);gap:.4em;justify-content:center}\n.lamplay .lp-continue .lp-play{display:block;flex:none;align-self:center}\n.lamplay.lp-series .lp-count-control{justify-content:center;align-items:flex-start;gap:.2em;min-height:3.4em;padding:.5em .8em}\n.lamplay .lp-count-name{display:block;line-height:1.2}.lamplay .lp-count{display:block;line-height:1.2}\n.lamplay.lp-series .lp-episode:not(.lp-skeleton){animation:none}\n.lamplay.lp-series[data-view] .lp-episode .lp-picture{transition:transform .26s cubic-bezier(.4,0,.2,1);will-change:transform;transform:scale(1);transform-origin:center bottom}\n.lamplay.lp-series[data-view=horizontal] .lp-episode,.lamplay.lp-series[data-view=card] .lp-episode{overflow:visible;position:relative;max-width:none;width:22vw;min-width:0;transition:background-color .16s ease}\n.lamplay.lp-series[data-view=horizontal] .lp-episode.focus .lp-picture,.lamplay.lp-series[data-view=horizontal] .lp-episode:focus .lp-picture,.lamplay.lp-series[data-view=card] .lp-episode.focus .lp-picture,.lamplay.lp-series[data-view=card] .lp-episode:focus .lp-picture{transform:scale(1.045)}\n.lamplay.lp-series[data-view=horizontal] .lp-picture,.lamplay.lp-series[data-view=card] .lp-picture{height:12.375vw}\n.lamplay.lp-series[data-view=horizontal] .lp-episode-info,.lamplay.lp-series[data-view=card] .lp-episode-info{height:6.1em;min-height:6.1em;padding-top:.7em;overflow:hidden}\n.lamplay.lp-series[data-view=horizontal] .lp-episode-info .lamplay__item-title,.lamplay.lp-series[data-view=card] .lp-episode-info .lamplay__item-title{font-size:.896em;display:block;line-height:1.2;height:1.2em;min-height:1.2em;max-height:1.2em;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;margin:0;-webkit-line-clamp:unset}\n.lamplay.lp-series[data-view=horizontal] .lp-description,.lamplay.lp-series[data-view=card] .lp-description{margin-top:.3em;height:3.9em}\n.lamplay.lp-series[data-view=horizontal] .lp-episode-meta,.lamplay.lp-series[data-view=card] .lp-episode-meta{margin-top:0;min-height:1.3em;flex:none}\n.lamplay.lp-series[data-view=horizontal] .lp-body-pane,.lamplay.lp-series[data-view=card] .lp-body-pane{padding-top:1.2em;align-items:center}\n.lamplay.lp-series[data-view=horizontal] .lp-episode.focus,.lamplay.lp-series[data-view=card] .lp-episode.focus{z-index:2}\n.lamplay.lp-series[data-view=horizontal] .lamplay__items,.lamplay.lp-series[data-view=card] .lamplay__items{margin-top:0;margin-bottom:0}\n.lamplay.lp-series[data-view=vertical] .lp-episode{position:relative;isolation:isolate;overflow:hidden;transition:transform .26s cubic-bezier(.4,0,.2,1),background-color .16s ease;transform:scale(1);transform-origin:center}\n.lamplay.lp-series[data-view=vertical] .lp-episode.focus,.lamplay.lp-series[data-view=vertical] .lp-episode:focus{transform:scale(1.015);box-shadow:none;z-index:2}\n.lamplay.lp-series[data-view=vertical] .lp-episode:after{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;z-index:10;box-shadow:none}\n.lamplay.lp-series[data-view=vertical] .lp-episode.lp-started:after{box-shadow:inset 0 0 0 1px rgba(255,255,255,.48)}\n.lamplay.lp-series[data-view=vertical] .lp-episode.focus:after,.lamplay.lp-series[data-view=vertical] .lp-episode:focus:after{box-shadow:inset 0 0 0 .16em #fff}\n.lamplay.lp-series[data-view=vertical] .lp-body-pane{padding-top:.3em;padding-bottom:.3em}\n.lamplay.lp-series[data-view=vertical] .lp-main{overflow:visible}\n.lamplay.lp-series[data-view=horizontal] .lp-unavailable .lp-availability,.lamplay.lp-series[data-view=card] .lp-unavailable .lp-availability{font-size:.7em;line-height:1.2;margin-top:.2em}\n.lamplay.lp-series[data-view=horizontal] .lp-unavailable .lp-description,.lamplay.lp-series[data-view=card] .lp-unavailable .lp-description{-webkit-line-clamp:2;height:2.6em;margin-top:.2em}\n.lamplay .lp-body-pane{position:relative}\n.lamplay .lp-body-pane:has(>.lp-empty){display:flex;align-items:center;justify-content:center}\n.lamplay .lp-body-pane>.lamplay__status.lp-empty{position:absolute;inset:0;left:0;top:0;max-width:none;width:auto;height:auto;transform:none;margin:0;display:flex!important;align-items:center;justify-content:center;padding:1em;text-align:center;background:none;box-shadow:none}\n.lamplay .lp-skeleton .lp-skeleton-line{min-height:1em;background:rgba(255,255,255,.08);border-radius:.2em;color:transparent}\n.lamplay.lp-series[data-view=vertical] .lp-skeleton .lp-episode-info{justify-content:flex-start;gap:.4em}\n.lamplay.lp-series[data-view=vertical] .lp-skeleton .lp-episode-meta{order:3;margin-top:auto}\n.lamplay .lp-loading-group .lp-count-name,.lamplay .lp-loading-group .lp-count{color:transparent}\n@media(max-height:800px){.lamplay.lp-series[data-view=card] .lp-title-slot{height:2.3em}.lamplay.lp-series[data-view=card] .lp-episode-info{height:5.8em;min-height:5.8em;padding-top:.4em}.lamplay.lp-series[data-view=card] .lp-hero-content{height:4.4em}.lamplay.lp-series[data-view=card] .lp-top{gap:.4em;padding-bottom:0}.lamplay.lp-series[data-view=card] .lp-filters{gap:.4em}}\n@media(max-height:650px){.lamplay.lp-series[data-view=horizontal] .lp-episode-info .lamplay__item-title,.lamplay.lp-series[data-view=card] .lp-episode-info .lamplay__item-title{font-size:.72em}}\n").appendTo('head');
+        $('<style id="lamplay-021-style"></style>').text("\n/* One set of content guides for episodes, movies and search results. */\n.lamplay.lp-series[data-view=horizontal] .lp-episode:first-child .lp-picture,.lamplay.lp-series[data-view=card] .lp-episode:first-child .lp-picture{transform-origin:left bottom}\n.lamplay.lp-series[data-view=horizontal] .lp-episode:last-child .lp-picture,.lamplay.lp-series[data-view=card] .lp-episode:last-child .lp-picture{transform-origin:right bottom}\n.lamplay .lp-panel{padding-left:var(--lp-inset);padding-right:var(--lp-inset);column-gap:var(--lp-inset)}\n.lamplay.lp-film[data-view] .lp-side{width:var(--lp-column);padding:0;gap:.65em}\n.lamplay.lp-film[data-view] .lp-side .lp-tools{width:100%;padding:0;gap:.4em;flex-direction:column;font-size:1em}\n.lamplay.lp-film[data-view] .lp-side .lp-tools>.lamplay__control{width:100%;height:2.8em;min-height:2.8em;padding:.55em .8em}\n.lamplay.lp-film[data-view] .lp-body-pane{padding-left:0;padding-right:0}\n.lamplay.lp-film[data-view=vertical] .lp-hero,.lamplay.lp-film[data-view=horizontal] .lp-hero{width:100%;height:auto;aspect-ratio:16/9;min-height:13.5em;max-height:none}\n.lamplay.lp-film[data-view=card] .lp-hero{width:100%;height:auto;aspect-ratio:auto;min-height:0;max-height:none}\n.lamplay.lp-film[data-view=card] .lp-hero-content{padding-left:0;padding-right:0}\n.lamplay.lp-series[data-view=horizontal] .lp-body-pane,.lamplay.lp-series[data-view=card] .lp-body-pane{align-items:flex-start}\n.lamplay.lp-series[data-view=card] .lp-body-pane{padding-top:calc(.556875vw + .2em)}\n.lamplay.lp-series[data-view=card] .lp-panel{row-gap:.2em}\n.lamplay.lp-series[data-view=card] .lp-top{padding-bottom:0}\n.lamplay.lp-series[data-view=horizontal] .lp-episode-info,.lamplay.lp-series[data-view=card] .lp-episode-info{padding-left:0;padding-right:0}\n@media(max-width:600px){\n.lamplay.lp-film[data-view] .lp-side{width:100%}\n.lamplay.lp-film[data-view] .lp-side .lp-tools{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}\n.lamplay.lp-film[data-view=vertical] .lp-hero,.lamplay.lp-film[data-view=horizontal] .lp-hero{min-height:13.5em}\n}\n").appendTo('head');
     }
     function start() { install(root.Lampa, root.jQuery || root.$); }
     if (root.Lampa) {

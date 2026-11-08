@@ -1,11 +1,13 @@
 {
   "name": "lamplay",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "private": true,
   "scripts": {
-    "test": "node tests/lamplay.test.cjs && node tests/lamplay-providers.cjs && node tests/lamplay-browser.cjs && node tests/lamplay-ui-regressions.cjs && node tests/lamplay-060-regressions.cjs && node tests/lamplay-070-regressions.cjs && node tests/lamplay-080-regressions.cjs && node tests/lamplay-090-regressions.cjs && node tests/lamplay-010-regressions.cjs && node tests/lamplay-011-regressions.cjs && node tests/lamplay-012-regressions.cjs && node tests/lamplay-013-regressions.cjs && node tests/lamplay-014-regressions.cjs && node tests/lamplay-015-regressions.cjs && node tests/lamplay-016-regressions.cjs && node tests/lamplay-017-regressions.cjs && node tests/lamplay-018-regressions.cjs",
+    "test": "node tests/lamplay.test.cjs && node tests/lamplay-providers.cjs && node tests/lamplay-browser.cjs && node tests/lamplay-ui-regressions.cjs && node tests/lamplay-060-regressions.cjs && node tests/lamplay-070-regressions.cjs && node tests/lamplay-019-logic.cjs && npm run test:020 && npm run test:021",
     "test:020": "node tests/lamplay-020-logic.cjs && node tests/lamplay-020-layout.cjs",
-    "test:019": "node tests/lamplay-019-logic.cjs && node tests/lamplay-019-layout.cjs"
+    "test:019": "node tests/lamplay-019-logic.cjs && node tests/lamplay-019-layout.cjs",
+    "test:021": "node tests/lamplay-021-kodik.cjs && node tests/lamplay-021-layout.cjs",
+    "test:legacy": "node tests/lamplay.test.cjs && node tests/lamplay-providers.cjs && node tests/lamplay-browser.cjs && node tests/lamplay-ui-regressions.cjs && node tests/lamplay-060-regressions.cjs && node tests/lamplay-070-regressions.cjs && node tests/lamplay-080-regressions.cjs && node tests/lamplay-090-regressions.cjs && node tests/lamplay-010-regressions.cjs && node tests/lamplay-011-regressions.cjs && node tests/lamplay-012-regressions.cjs && node tests/lamplay-013-regressions.cjs && node tests/lamplay-014-regressions.cjs && node tests/lamplay-015-regressions.cjs && node tests/lamplay-016-regressions.cjs && node tests/lamplay-017-regressions.cjs && node tests/lamplay-018-regressions.cjs"
   },
   "devDependencies": {
     "playwright": "1.64.1",
