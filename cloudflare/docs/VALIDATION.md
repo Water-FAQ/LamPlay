@@ -2,7 +2,7 @@
 
 Дата: 8 ноября 2026. Статус: пакет 0.2.0-preparation, не рабочая интеграция LamPlay.
 
-Новые маршруты HDRezka/Kodik/Filmix/KinoTochka проверены синтетически: 36 сценариев суммарно, включая трехшаговый Kodik resolve, различение отказа токена и сети, передачу cookies без смешения пользователей, HTTPS Filmix, POST JSON/preflight, ограничение размера и времени чтения тела. Свежий прогон workerd для версии 0.2.0 будет зафиксирован после завершения CI. Живые запросы новых маршрутов с IP Cloudflare не выполнялись.
+Новые маршруты HDRezka/Kodik/Filmix/KinoTochka проверены синтетически: 36 сценариев суммарно, включая трехшаговый Kodik resolve, различение отказа токена и сети, передачу cookies без смешения пользователей, HTTPS Filmix, POST JSON/preflight, ограничение размера и времени чтения тела. Все этапы пакета 0.2.0 успешно выполнены: [GitHub Actions 42523139393](https://github.com/Water-FAQ/LamPlay/actions/runs/42523139393), код `5d2113b09117d6ebfefe9b75638314695f44b3e8`. Проверены синтаксис, 36 тестов, Wrangler dry-run и workerd smoke с POST, JSON и rate bindings. Живые запросы новых маршрутов с IP Cloudflare не выполнялись.
 
 ## Выполнено локально
 
