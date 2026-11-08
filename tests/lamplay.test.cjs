@@ -159,7 +159,7 @@ function harness(seed={}) {
     Object.assign(d.window.mock.values,seed);d.window.eval(source);
     return {w:d.window,$:d.window.jQuery,m:d.window.mock,L:d.window.Lampa,close:()=>d.window.close()};
 }
-async function settle(){for(let i=0;i<8;i++)await tick();}
+async function settle(){for(let i=0;i<25;i++)await tick();}
 async function interfaceTests(){
     let h=harness();h.m.open();await settle();
     test('Exact source match opens the serial directly with season and translation strips',()=>{
