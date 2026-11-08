@@ -1,0 +1,52 @@
+[
+  {
+    "repository": "Water-FAQ/LamPlay",
+    "commit": "53023fb90c968d6851a51678655542601d1189b7",
+    "date": "2026-11-08T17:14:20Z"
+  },
+  {
+    "repository": "nb557/plugins",
+    "commit": "cde2cf057e6634df43553fe8deeaef5030f95945",
+    "date": "2026-10-25T21:55:46Z"
+  },
+  {
+    "repository": "iwalker2005/lampa-online-plus",
+    "commit": "13e31f8d572c0bb745712b92759057b7792630ef",
+    "date": "2026-06-14T19:27:13Z"
+  },
+  {
+    "repository": "iwalker2005/nb557-plugins",
+    "commit": "7d811ee56918cab2e572d1d171ffde2f85bea7ab",
+    "date": "2026-06-15T16:27:48Z"
+  },
+  {
+    "repository": "YaNesyTortiK/AnimeParsers",
+    "commit": "cac4c83e03e43f2829506ef202a1279a4e0b78bf",
+    "date": "2026-09-05T14:34:48Z"
+  },
+  {
+    "repository": "ialakey/anime-dl-core",
+    "commit": "f23b7c1b1403c7adc7eaa60ba6323a75e35c9771",
+    "date": "2026-09-20T00:40:12Z"
+  },
+  {
+    "repository": "lampac-nextgen/lampac",
+    "commit": "3a1d609e0bf56a9a0d2f4572003a75aa80abefc5",
+    "date": "2026-11-03T12:59:28Z"
+  },
+  {
+    "repository": "Zibri/cloudflare-cors-anywhere",
+    "commit": "01b4ab3967a9d29f0b9124adde7f79110a3ba536",
+    "date": "2026-07-20T09:04:14Z"
+  },
+  {
+    "repository": "Darkseal/CORSflare",
+    "commit": "e619ac0d36ba21f096b0a5dd702dd47dc93dc1cc",
+    "date": "2020-09-13T20:06:32Z"
+  },
+  {
+    "repository": "cloudflare/wrangler-action",
+    "commit": "a17640ae5ec0d99c8c75e908aa69f5519037cd4e",
+    "date": "2026-09-24T21:14:23Z"
+  }
+]

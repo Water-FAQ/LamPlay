@@ -1,0 +1,177 @@
+[
+  {
+    "case": "animelib-search",
+    "status": 200,
+    "final_host": "api.lib.social",
+    "content_type": "application/json",
+    "cors": "http://lampa.mx",
+    "bytes": 42741,
+    "seconds": 7.97,
+    "keys": [
+      "data",
+      "links",
+      "meta"
+    ],
+    "items": 31,
+    "first_item_fields": [
+      "id",
+      "name",
+      "rus_name",
+      "eng_name",
+      "model",
+      "slug",
+      "slug_url",
+      "cover",
+      "ageRestriction",
+      "site",
+      "type",
+      "rating"
+    ]
+  },
+  {
+    "case": "animelib-episodes",
+    "status": 200,
+    "final_host": "api.lib.social",
+    "content_type": "application/json",
+    "cors": "http://lampa.mx",
+    "bytes": 4360,
+    "seconds": 7.21,
+    "keys": [
+      "data"
+    ],
+    "items": 13,
+    "first_item_fields": [
+      "id",
+      "model",
+      "name",
+      "number",
+      "number_secondary",
+      "season",
+      "status",
+      "anime_id",
+      "created_at",
+      "item_number",
+      "type"
+    ]
+  },
+  {
+    "case": "animelib-constants",
+    "status": 200,
+    "final_host": "api.lib.social",
+    "content_type": "application/json",
+    "cors": "http://lampa.mx",
+    "bytes": 403,
+    "seconds": 7.39,
+    "keys": [
+      "data"
+    ]
+  },
+  {
+    "case": "cvh-kp",
+    "status": 200,
+    "final_host": "plapi.cdnvideohub.com",
+    "content_type": "application/json; charset=utf-8",
+    "cors": null,
+    "bytes": 1251,
+    "seconds": 6.18,
+    "keys": [
+      "titleName",
+      "isSerial",
+      "items",
+      "trailers",
+      "ads",
+      "vast"
+    ],
+    "items": 4
+  },
+  {
+    "case": "cvh-mali",
+    "status": 200,
+    "final_host": "plapi.cdnvideohub.com",
+    "content_type": "application/json; charset=utf-8",
+    "cors": null,
+    "bytes": 24351,
+    "seconds": 6.08,
+    "keys": [
+      "titleName",
+      "isSerial",
+      "items",
+      "trailers",
+      "ads",
+      "vast",
+      "yad"
+    ],
+    "items": 133
+  },
+  {
+    "case": "animego-search",
+    "status": 403,
+    "final_host": "animego.org",
+    "content_type": "text/plain; charset=UTF-8",
+    "cors": null,
+    "bytes": 17,
+    "seconds": 3.94,
+    "has_player_parameters": false,
+    "challenge_or_unavailable": false
+  },
+  {
+    "case": "aniboom-embed",
+    "status": 404,
+    "final_host": "aniboom.one",
+    "content_type": "text/html; charset=UTF-8",
+    "cors": null,
+    "bytes": 993,
+    "seconds": 5.31,
+    "has_player_parameters": false,
+    "challenge_or_unavailable": false
+  },
+  {
+    "case": "animelib-naruto-episodes",
+    "status": 200,
+    "bytes": 112229,
+    "keys": [
+      "data"
+    ],
+    "count": 220,
+    "anime_ids": [
+      11
+    ]
+  },
+  {
+    "case": "animelib-naruto-episode",
+    "status": 200,
+    "bytes": 1270,
+    "keys": [
+      "data"
+    ],
+    "player_types": [
+      "Kodik"
+    ]
+  },
+  {
+    "case": "cvh-video",
+    "status": 200,
+    "bytes": 3109,
+    "keys": [
+      "unitedVideoId",
+      "duration",
+      "failoverHost",
+      "thumbUrl",
+      "sources"
+    ],
+    "source_formats": [
+      "hlsUrl",
+      "dashUrl",
+      "mpegQhdUrl",
+      "mpeg2kUrl",
+      "mpeg4kUrl",
+      "mpegHighUrl",
+      "mpegFullHdUrl",
+      "mpegMediumUrl",
+      "mpegLowUrl",
+      "mpegLowestUrl",
+      "mpegTinyUrl"
+    ],
+    "cors": "http://lampa.mx"
+  }
+]

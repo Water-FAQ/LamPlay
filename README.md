@@ -1,3 +1,5 @@
+> Подготовка Cloudflare (без изменения плагина 0.22.0): [пакет, исследование и настройка](cloudflare/README.md). Worker еще не развернут в аккаунте пользователя.
+
 # LamPlay 0.22.0 - 08.11.2026
 
 Постоянный адрес: **https://water-faq.github.io/LamPlay/lamplay.js**

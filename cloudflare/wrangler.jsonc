@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "lamplay-metadata",
+  "main": "src/worker.mjs",
+  "compatibility_date": "2026-11-08",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": false },
+  "vars": {
+    "ENABLED_SOURCES": "",
+    "ALLOWED_ORIGINS": "http://lampa.mx,https://lampa.mx",
+    "ALLOW_ORIGINLESS": "false"
+  },
+  "ratelimits": [
+    {
+      "name": "REQUEST_LIMITER",
+      "namespace_id": "92201",
+      "simple": { "limit": 120, "period": 60 }
+    },
+    {
+      "name": "SOURCE_LIMITER",
+      "namespace_id": "92202",
+      "simple": { "limit": 240, "period": 60 }
+    }
+  ]
+}
