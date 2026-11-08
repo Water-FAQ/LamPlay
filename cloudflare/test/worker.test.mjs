@@ -122,7 +122,8 @@ test('streamed and declared oversized bodies are bounded', async () => {
 test('timeout covers connection and incomplete response body', async () => {
   const wait = () => new Promise(() => {});
   const stalledBody = () => new Response(new ReadableStream({ start() {} }), { headers: { 'Content-Type': 'application/json' } });
-  for (const fetcher of [wait, stalledBody]) {
+  const aborting = (_, options) => new Promise((_, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true }));
+  for (const fetcher of [wait, stalledBody, aborting]) {
     const r = await make(fetcher, { timeoutMs: 10 }).fetch(req(search), env);
     assert.equal(r.status, 504); assert.equal(await code(r), 'upstream_timeout');
   }

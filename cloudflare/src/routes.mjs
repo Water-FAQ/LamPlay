@@ -1,13 +1,8 @@
+import { HttpError } from './errors.mjs';
+export { HttpError } from './errors.mjs';
+import { sourcePolicy, resolveSourceRoute, transformSource } from './source-routes.mjs';
 // Fixed public metadata endpoints; callers cannot provide hosts or headers.
-export const SOURCES = ['animelib', 'cdnvideohub', 'animego', 'aniboom'];
-export class HttpError extends Error {
-  constructor(status, code, upstreamStatus) {
-    super(code);
-    this.status = status;
-    this.code = code;
-    this.upstreamStatus = upstreamStatus;
-  }
-}
+export const SOURCES = ['animelib', 'cdnvideohub', 'animego', 'aniboom', 'rezka', 'kodik', 'filmix', 'kinotochka'];
 const bad = () => { throw new HttpError(400, 'invalid_parameters'); };
 const positive = value => /^[1-9]\d{0,14}$/.test(value || '') ? value : bad();
 const slug = value => /^[1-9]\d{0,9}--[a-z0-9][a-z0-9-]{0,180}$/.test(value || '') ? value : bad();
@@ -27,7 +22,8 @@ function parameters(url, allowed) {
 function route(source, target, format, ttl = 0, headers = {}) {
   return { source, target, format, ttl, headers };
 }
-export function resolveRoute(url) {
+export function resolveRoute(url, env = {}, method = 'GET', body) {
+  if (sourcePolicy(url.pathname)) return resolveSourceRoute(url, env, method, body);
   let p;
   const lib = 'https://api.lib.social/api/';
   const cvh = 'https://plapi.cdnvideohub.com/api/v1/player/sv/';
@@ -108,6 +104,7 @@ export function transform(text, spec) {
   if (/just a moment|verify you are human|cf-chl-|site unavailable/i.test(text.slice(0, 8192))) {
     throw new HttpError(502, 'upstream_challenge');
   }
+  if (['rezka','kodik','filmix','kinotochka'].includes(spec.source)) return transformSource(text, spec);
   if (spec.format === 'html') return { body: text, mime };
   if (spec.format === 'aniboom') return { body: JSON.stringify(aniboom(text)), mime };
   let data;

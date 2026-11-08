@@ -5,22 +5,36 @@
   "compatibility_date": "2026-11-08",
   "workers_dev": true,
   "preview_urls": false,
-  "observability": { "enabled": false },
+  "observability": {
+    "enabled": false
+  },
   "vars": {
     "ENABLED_SOURCES": "",
     "ALLOWED_ORIGINS": "http://lampa.mx,https://lampa.mx",
-    "ALLOW_ORIGINLESS": "false"
+    "ALLOW_ORIGINLESS": "false",
+    "REZKA_ORIGIN": "https://rezka.ag",
+    "KODIK_API_ORIGIN": "https://kodik-api.com",
+    "KODIK_PLAYER_ORIGIN": "https://kodikplayer.com",
+    "FILMIX_MOBILE_ORIGIN": "https://filmixapp.cyou",
+    "KINOTOCHKA_ORIGIN": "https://kinovibe.vip",
+    "KINOTOCHKA_PLAYLIST_ORIGIN": "https://kinovibe.vip"
   },
   "ratelimits": [
     {
       "name": "REQUEST_LIMITER",
       "namespace_id": "92201",
-      "simple": { "limit": 120, "period": 60 }
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
     },
     {
       "name": "SOURCE_LIMITER",
       "namespace_id": "92202",
-      "simple": { "limit": 240, "period": 60 }
+      "simple": {
+        "limit": 240,
+        "period": 60
+      }
     }
   ]
 }

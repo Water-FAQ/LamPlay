@@ -1,17 +1,19 @@
 # Проверка подготовительного пакета
 
-Дата: 8 ноября 2026. Статус: подготовка, не рабочая интеграция LamPlay.
+Дата: 8 ноября 2026. Статус: пакет 0.2.0-preparation, не рабочая интеграция LamPlay.
+
+Новые маршруты HDRezka/Kodik/Filmix/KinoTochka проверены синтетически: 36 сценариев суммарно, включая трехшаговый Kodik resolve, различение отказа токена и сети, передачу cookies без смешения пользователей, HTTPS Filmix, POST JSON/preflight, ограничение размера и времени чтения тела. Свежий прогон workerd для версии 0.2.0 будет зафиксирован после завершения CI. Живые запросы новых маршрутов с IP Cloudflare не выполнялись.
 
 ## Выполнено локально
 
 - `npm run check`: синтаксис Worker и отдельного ES5-клиента.
-- `npm test`: 21 сценарий; фиксированные маршруты, неверные/повторные параметры, отсутствие произвольного URL, origin policy и preflight, запрет POST/Range, отсутствие передачи Cookie/Authorization/IP, отказ от redirects, различие пустого успеха и ошибки, JSON shape, запрет binary/oversize, тайм-аут соединения и тела, обязательные лимитеры, кэш без утечки Origin, отказ от кэша private/cookies, удаление ads/VAST CVH и Aniboom, раскрытие AnimeGO JSON, challenge без повторов, клиентская отмена позднего ответа.
+- `npm test` первоначального пакета: 21 сценарий; фиксированные маршруты, неверные/повторные параметры, отсутствие произвольного URL, origin policy и preflight, запрет POST/Range, отсутствие передачи Cookie/Authorization/IP, отказ от redirects, различие пустого успеха и ошибки, JSON shape, запрет binary/oversize, тайм-аут соединения и тела, обязательные лимитеры, кэш без утечки Origin, отказ от кэша private/cookies, удаление ads/VAST CVH и Aniboom, раскрытие AnimeGO JSON, challenge без повторов, клиентская отмена позднего ответа.
 - `npm run dry-run`: Wrangler 4.158.0 собрал Worker и подтвердил обе rate-limit binding и vars. Облачной загрузки не было.
 - Реальные публичные API проверены отдельно из среды исследования, результаты в live-probes-2026-11-08.json. Полные тела, cookies и подписанные URL в пакет не включены.
 
 ## Проверка runtime в GitHub Actions
 
-Сценарий cloudflare-check.yml запускает те же проверки, dry-run и `runtime-smoke.mjs` под Node 22. Smoke запускает локальный workerd, проверяет /health, source_disabled и отказ чужому Origin. Внешние источники и Cloudflare-аккаунт не используются. Все этапы успешно завершены: [GitHub Actions 42521055702](https://github.com/Water-FAQ/LamPlay/actions/runs/42521055702), проверенный код `656222692ba16c318b778dcfdbda1df2a938ace1`. Входной модуль экспортирует только Worker handler; тестируемое ядро вынесено в отдельный модуль.
+Сценарий cloudflare-check.yml запускает те же проверки, dry-run и `runtime-smoke.mjs` под Node 22. Smoke запускает локальный workerd, проверяет /health, source_disabled, отказ чужому Origin, POST preflight, чтение JSON и реальные локальные rate-limit binding. Внешние источники и Cloudflare-аккаунт не используются. Первоначальная версия 0.1.0: все этапы успешно завершены: [GitHub Actions 42521055702](https://github.com/Water-FAQ/LamPlay/actions/runs/42521055702), проверенный код `656222692ba16c318b778dcfdbda1df2a938ace1`. Входной модуль экспортирует только Worker handler; тестируемое ядро вынесено в отдельный модуль.
 
 ## Не подтверждено
 

@@ -1,3 +1,9 @@
+# Cloudflare: расширение подготовки — 08.11.2026
+
+Пакет Worker 0.2.0-preparation: HDRezka search/page/episodes/stream, Kodik search/list/get-player/page/трехшаговый resolve, Filmix TV/site/mobile, KinoTochka search/find/page/playlist. Персональные токены и явно переданная существующая cookie HDRezka — только POST JSON к Worker и без общего кэша/хранения. Логин HDRezka не проксируется, HTTP для Filmix с токеном не поддерживается. Синтетические тесты не означают подтвержденную работу upstream из Cloudflare. Постоянный lamplay.js не изменен. Контракт и ограничения: [cloudflare/docs/SOURCES-API.md](cloudflare/docs/SOURCES-API.md).
+
+---
+
 # Подготовка Cloudflare — 08.11.2026
 
 Самостоятельный пакет без изменения lamplay.js. Проверены 21 тест Worker/клиента, синтаксис и Wrangler dry-run. Проверка runtime workerd успешно выполнена отдельным cloudflare-check.yml без секретов: https://github.com/Water-FAQ/LamPlay/actions/runs/42521055702 . Облачной публикации, нового релиза плагина и проверки ТВ нет. Состояние подготовки и ограничения: [cloudflare/docs/VALIDATION.md](cloudflare/docs/VALIDATION.md).

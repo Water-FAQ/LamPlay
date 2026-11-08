@@ -1,3 +1,9 @@
+# Cloudflare: расширение подготовки — 08.11.2026
+
+Пакет Worker 0.2.0-preparation: HDRezka search/page/episodes/stream, Kodik search/list/get-player/page/трехшаговый resolve, Filmix TV/site/mobile, KinoTochka search/find/page/playlist. Персональные токены и явно переданная существующая cookie HDRezka — только POST JSON к Worker и без общего кэша/хранения. Логин HDRezka не проксируется, HTTP для Filmix с токеном не поддерживается. Синтетические тесты не означают подтвержденную работу upstream из Cloudflare. Постоянный lamplay.js не изменен. Контракт и ограничения: [cloudflare/docs/SOURCES-API.md](cloudflare/docs/SOURCES-API.md).
+
+---
+
 # Подготовка Cloudflare — 08.11.2026
 
 Рабочие адаптеры 0.22.0 не менялись. Подготовлены фиксированные маршруты метаданных CDNVideoHub/AnimeLib/AnimeGO/Aniboom и отдельный клиент для будущей интеграции. Все источники Worker изначально отключены, развертывания не было.
