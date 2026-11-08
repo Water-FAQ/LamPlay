@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import fs from 'node:fs';
-import { createWorker } from '../src/worker.mjs';
+import { createWorker } from '../src/core.mjs';
 import { resolveRoute, transform } from '../src/routes.mjs';
 
 const allow = { limit: async () => ({ success: true }) };

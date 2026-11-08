@@ -6,7 +6,7 @@
 
 ## Что подготовлено
 
-- `src/worker.mjs`, `src/routes.mjs`: Worker для публичных метаданных и получения ссылок.
+- `src/worker.mjs`, `src/core.mjs`, `src/routes.mjs`: Worker для публичных метаданных и получения ссылок.
 - `wrangler.jsonc`: конфигурация Cloudflare без токенов, домена и Account ID.
 - `client/transport.js`: отдельный ES5-клиент для следующей согласованной интеграции. Текущий плагин его не загружает.
 - `test/worker.test.mjs`: проверки маршрутов, CORS, отмены, лимитов, тайм-аутов, кэша и очистки рекламных полей CVH/Aniboom.
