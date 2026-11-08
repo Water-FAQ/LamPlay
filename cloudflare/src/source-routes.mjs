@@ -203,7 +203,7 @@ export async function resolveKodik(spec, step) {
   const payload = { type: type[1], hash: hash[1], id: id[1], info: '{}', bad_user: 'true', cdn_is_working: 'true' };
   for (const key of ['d','d_sign','pd','pd_sign','ref','ref_sign']) {
     if (typeof data[key] !== 'string' || data[key].length > 3000) throw new HttpError(502, 'upstream_shape_changed');
-    payload[key] = data[key];
+    try { payload[key] = decodeURIComponent(data[key]); } catch { throw new HttpError(502, 'upstream_shape_changed'); }
   }
   const links = await step({ ...spec, target: host + path, method: 'POST', body: new URLSearchParams(payload).toString(), flow: undefined, format: 'kodik-links', headers: { Origin: host, Referer: spec.target } });
   const result = JSON.parse(links.body), quality = {};

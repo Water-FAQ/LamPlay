@@ -77,7 +77,7 @@ test('Kodik get-player and integration script use fixed endpoints', async () => 
   assert.equal(r.status,200); assert.equal((await r.json()).found,false);
 });
 
-const payload={d:'example',d_sign:'a',pd:'example',pd_sign:'b',ref:'example',ref_sign:'c'};
+const payload={d:'example',d_sign:'a%2Fb%2Bc%3D',pd:'example',pd_sign:'b',ref:'example',ref_sign:'c'};
 const playerHtml=(asset='/assets/js/app.player_single.min.js')=>`urlParams = '${JSON.stringify(payload)}'; videoInfo.type='serial'; videoInfo.hash='hash123'; videoInfo.id='10'; <script src="${asset}"></script>`;
 const playerScript=(path='/gvi')=>`$.ajax({type:"POST",url:atob("${btoa(path)}")});`;
 test('Kodik resolve follows bounded page → script → POST chain without executing JS', async () => {
@@ -90,7 +90,7 @@ test('Kodik resolve follows bounded page → script → POST chain without execu
   },cache:{match(){cache++;},put(){cache++;}}});
   const result=await worker.fetch(request('/v1/kodik/resolve',{path:'/seria/10/hash123/720p'}),{...env,SOURCE_LIMITER:{limit:async()=>{limits++;return{success:true};}}});
   assert.equal(result.status,200);assert.equal((await result.json()).quality['720p'],'https://media.example/stream.m3u8');
-  assert.equal(calls.length,3);assert.equal(calls[2].opt.method,'POST');assert.equal(new URLSearchParams(calls[2].opt.body).get('d_sign'),'a');assert.equal(limits,3);assert.equal(cache,0);
+  assert.equal(calls.length,3);assert.equal(calls[2].opt.method,'POST');assert.equal(new URLSearchParams(calls[2].opt.body).get('d_sign'),'a/b+c=');assert.equal(limits,3);assert.equal(cache,0);
 });
 
 test('Kodik resolver rejects foreign assets/endpoints and stops after source throttling', async () => {
