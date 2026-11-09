@@ -3,7 +3,7 @@
   "version": "0.23.0",
   "private": true,
   "scripts": {
-    "test": "node tests/lamplay.test.cjs && node tests/lamplay-providers.cjs && node tests/lamplay-browser.cjs && node tests/lamplay-ui-regressions.cjs && node tests/lamplay-060-regressions.cjs && node tests/lamplay-070-regressions.cjs && node tests/lamplay-019-logic.cjs && node tests/lamplay-020-logic.cjs && node tests/lamplay-021-kodik.cjs && npm run test:022 && npm run test:023",
+    "test": "node tests/run-current.cjs",
     "test:023": "node tests/lamplay-023-transport.cjs && node tests/lamplay-023-regressions.cjs && node tests/lamplay-023-browser.cjs",
     "test:022": "node tests/lamplay-022-regressions.cjs",
     "test:020": "node tests/lamplay-020-logic.cjs && node tests/lamplay-020-layout.cjs",
