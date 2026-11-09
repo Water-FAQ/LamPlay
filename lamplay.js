@@ -1667,6 +1667,12 @@
                     var resumeRow=hero.find('.lp-resume-row')[0],seasonCaption=filters.find('.lp-caption')[0];
                     if(resumeRow && seasonCaption){var resumeBox=resumeRow.getBoundingClientRect(),baseFont=parseFloat(root.getComputedStyle(html[0]).fontSize),resumeBottom=Math.max(resumeBox.bottom,resumeBox.top+baseFont*(.9*2.8)),clearance=resumeBottom+baseFont*.35-seasonCaption.getBoundingClientRect().top;if(clearance>0)hero.css('margin-bottom',Math.ceil(clearance)+'px');}
                 }
+                if(sideways){
+                    var firstRow=body.children('.lp-episode').first(),firstPicture=firstRow.find('.lp-picture'),paneBox=bodyPane[0].getBoundingClientRect();
+                    if(firstRow.length && firstPicture.length){var rowHeight=firstRow[0].offsetHeight,pictureHeight=firstPicture[0].offsetHeight,paneStyle=root.getComputedStyle(bodyPane[0]),available=paneBox.height-parseFloat(paneStyle.paddingTop)-parseFloat(paneStyle.paddingBottom),excess=rowHeight-available+4;
+                        if(excess>0 && pictureHeight>0){var height=Math.max(48,pictureHeight-excess),width=firstRow[0].offsetWidth*height/pictureHeight;body.children('.lp-episode').css('width',width+'px').find('.lp-picture').css('height',height+'px');}
+                    }
+                }
                 if(!series())bodyPane.css('padding-bottom',root.getComputedStyle(body[0]).rowGap);
                 html.find('.lp-strip,.lp-tools').each(function(){if($(this).hasClass('lp-strip') || !listLayout())edgeFade(this,true);});
                 if(release && !errorMessage){edgeFade(bodyPane[0],sideways);bodyPane.off('scroll.lpEdges').on('scroll.lpEdges',function(){edgeFade(this,sideways);});}
