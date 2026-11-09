@@ -29,3 +29,8 @@ var client = LamPlayMetadataClient(workerOrigin, null, {
 Локальный workerd в текущей среде не запустился из-за uv_interface_addresses. Runtime smoke выполняется в GitHub Actions; это ограничение среды не заменяется заявлением об успешном локальном запуске. Воспроизведение на LG не проверено.
 
 Контракты: [API](docs/API.md), [источники](docs/SOURCES-API.md), [настройка](docs/SETUP.md), [проверки](docs/TESTING.md). История и текущие ограничения: [SOURCES.md](../SOURCES.md), [AUDIT.md](../AUDIT.md).
+
+
+## Проверка после публикации
+
+Worker0.3.0-testing опубликован (Actions42574400817). CI43/43 и workerd smoke прошли. Прямые резервы CVH/Filmix и проверка каталога KinoTochka успешно проверены подготовленным клиентом. HDRezka через Cloudflare не работает: login/search на standby-rezka.tv и kvk.zone возвращают upstream520; напрямую новый login-flow и HLS работают. Реальная авторизация через опубликованный Worker не подтверждена. Это ограничение нельзя скрывать сообщением об успешном входе. LamPlay по-прежнему не подключен.
