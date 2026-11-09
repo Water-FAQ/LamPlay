@@ -2,7 +2,7 @@
     const $=root.jQuery;
     // JSDOM has no image decoder; synthetic fixture assets are immediately ready.
     if(/jsdom/i.test(root.navigator.userAgent))root.Image=function(){this.complete=true;};
-    const values={lamplay_source:'rezka'}, components={}, listeners={},settingsListeners={},params={},calls=[],notices=[],played=[],timeline={},controllers={};
+    const values={lamplay_source:'rezka',lamplay_proxy_rezka:'no',lamplay_proxy_kodik:'no',lamplay_proxy_filmix:'no',lamplay_proxy_cdnvideohub:'no',lamplay_proxy_kinotochka:'no'}, components={}, listeners={},settingsListeners={},params={},calls=[],notices=[],played=[],timeline={},controllers={};
     let active=null,selection=null,input=null,film=false,loggedIn=false,confirm=true,hold=false,pending=[],many=false,ambiguous=false,aliasMovie=false,missingLogo=false,upcoming=false;
     const events=()=>{const subs={};return {follow:(n,f)=>(subs[n]||=[]).push(f),send:(n,e)=>(subs[n]||[]).forEach(f=>f(e))};};
     const playerEvents=events(),videoEvents=events(),playlistEvents=events();let playlist=[],playdata=null;

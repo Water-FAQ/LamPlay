@@ -1791,7 +1791,7 @@
                 });
                 control('Сбросить фильтр',function () {query=initialQuery;pendingResume=null;if(source.clearCache)source.clearCache();search();});
                 control(query,searchMenu).empty().text(query).wrapInner('<span class="lp-control-value"></span>').attr({'aria-label':'Поиск: '+query,'data-lp-control':'search'}).addClass('lp-search').prepend('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/></svg>');
-                if (!resultsVisible) control('К результатам',function(){if(results)backToResults();});
+                if (!resultsVisible){var resultButton=control('К результатам',function(){if(results)backToResults();});if(!results)resultButton.removeClass('selector').attr({'aria-disabled':'true',tabindex:'-1'});}
                 layout();if(!busy)updateCounts();if(restoreControl) {var restored=controlTarget(restoreControl);if(restored.length) last=restored[0];}
             }
             function search() {
@@ -1952,8 +1952,8 @@
             function started(ep){return object(setting('started',{}))[episodeHash(movie,ep.season,ep.number,series(),Lampa.Utils.hash)];}
             function isWatched(ep,p){
                 if(!series() || !(+p.duration>0))return false;
-                var genres=list(movie.genre_ids).concat(list(movie.genres).map(function(g){return g.id;}));
-                var anime=source.id==='anilibria' || source.id==='animelib' || movie.original_language==='ja' && genres.indexOf(16)>=0;
+                var details=metadata.details || movie,genres=list(movie.genre_ids).concat(list(details.genres).map(function(g){return g.id;}));
+                var anime=source.id==='libria' || source.id==='animelib' || source.id==='aniboom' || !!movie.shikimori_id || (movie.original_language || details.original_language)==='ja' && genres.indexOf(16)>=0;
                 var duration=+p.duration,credits=anime?90:duration<=2400?120:duration<=3600?180:240;
                 credits=Math.min(credits,duration*.1);
                 return +p.time>=duration-credits;
@@ -2065,7 +2065,7 @@
                     var node=interactive($('<div class="lamplay__item lp-episode"></div>'),function () {play(ep);});
                     node[0]._lpEpisodeKey=streamKey(ep);
                     node.on('hover:long',function(){episodeActions(ep);});
-                    var picture=$('<div class="lp-picture"></div>');node.toggleClass('lp-started',isStarted(ep,p)).toggleClass('lp-watched',isWatched(ep,p) && flag(setting('dim_watched',true),true));picture.append($('<span class="lp-focus-play"></span>').append(PLAY));
+                    var picture=$('<div class="lp-picture"></div>');node.toggleClass('lp-started',isStarted(ep,p)).toggleClass('lp-completed',isWatched(ep,p) && flag(setting('dim_watched',true),true));picture.append($('<span class="lp-focus-play"></span>').append(PLAY));
                     var img=series()?thumbnail(ep):'';
                     if (img) picture.append(setImage($('<img alt="" loading="eager" decoding="async">'),img));
                     if (series()) picture.append($('<span class="lp-episode-number"></span>').text('S'+ep.season+':E'+ep.number));
@@ -3449,7 +3449,7 @@
             '.lamplay.lp-series[data-view=horizontal] .lp-episode-info,.lamplay.lp-series[data-view=card] .lp-episode-info{padding-top:calc(.75vw + .4em)}',
             '.lamplay.lp-series[data-view=vertical] .lamplay__items{row-gap:.7em}',
             '.lamplay.lp-series[data-view=vertical] .lp-body-pane{padding-top:.6em;padding-bottom:.6em}',
-            '.lamplay .lp-episode.lp-watched:not(.lp-unavailable):not(.focus):not(:focus)>.lp-picture,.lamplay .lp-episode.lp-watched:not(.lp-unavailable):not(.focus):not(:focus)>.lp-episode-info{opacity:.75}',
+            '.lamplay .lp-episode.lp-completed:not(.lp-unavailable):not(.focus):not(:focus)>.lp-picture,.lamplay .lp-episode.lp-completed:not(.lp-unavailable):not(.focus):not(:focus)>.lp-episode-info{opacity:.75}',
             '.lamplay .lp-body-pane>.lamplay__status.lp-error{position:absolute;inset:0;margin:0;max-width:none;width:auto;height:auto;transform:none;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:1em;gap:1em;background:none;box-shadow:none}',
             '.settings-folder[data-component=lamplay] .settings-folder__icon{display:flex;align-items:center;justify-content:center}.settings-folder[data-component=lamplay] .lamplay-logo{width:100%;height:100%}'
         ].join('\n')).appendTo('head');

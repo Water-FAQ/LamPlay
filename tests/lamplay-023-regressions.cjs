@@ -16,8 +16,8 @@ async function ui(view='horizontal',setup=''){
   assert.deepEqual($('.lp-tools [data-lp-control]').toArray().map(n=>n.dataset.lpControl),initial);
   const hash=Object.keys(Object.values(w.mock.values.lamplay_episode_registry)[0])[0];
   w.mock.timeline[hash]={time:1380,duration:1500,percent:92};w.mock.screen.playerClosed();
-  assert.ok($('.lp-episode').first().hasClass('lp-watched'));assert.ok(!$('.lp-episode').first().hasClass('lp-started'));
-  w.mock.timeline[hash]={time:1379,duration:1500,percent:92};w.mock.screen.playerClosed();assert.ok(!$('.lp-episode').first().hasClass('lp-watched'));
+  assert.ok($('.lp-episode').first().hasClass('lp-completed'));assert.ok(!$('.lp-episode').first().hasClass('lp-started'));
+  w.mock.timeline[hash]={time:1379,duration:1500,percent:92};w.mock.screen.playerClosed();assert.ok(!$('.lp-episode').first().hasClass('lp-completed'));
   const cards=$('.lp-episode').toArray(),titles=$('.lp-episode-info').text();
   w.mock.hold();w.mock.click('Студия 2');assert.equal($('.lp-skeleton').length,0);assert.deepEqual($('.lp-episode').toArray(),cards);assert.equal($('.lp-episode-info').text(),titles);assert.equal($('[data-count-season]').length,2);w.mock.release();
   d.window.close();
@@ -26,6 +26,16 @@ async function ui(view='horizontal',setup=''){
   source('cdnvideohub');await until(()=>!$('.lamplay').hasClass('lp-loading'));assert.ok($('.lp-empty').length);assert.equal($('.lp-caption').length,2);assert.ok($('.focus').length);
   source('rezka');await until(()=>$('.lp-episode:not(.lp-skeleton)').length>0);source('cdnvideohub');await until(()=>!$('.lamplay').hasClass('lp-loading'));
   assert.equal($('.lp-episode').length,0);assert.ok($('.lp-empty').text().includes('Ничего не найдено'));assert.ok($('.lp-tools').text().includes('CDN VideoHub'));assert.ok($('.focus').length);
+  w.eval(`const OldRequest=Lampa.Reguest;Lampa.Reguest=function(){const r=new OldRequest(),native=r.native;r.native=r.silent=(url,ok,fail,...args)=>url.includes('kinovibe.cc')?setTimeout(()=>fail({status:403},'error'),1):native(url,ok,fail,...args);return r;};`);
+  source('kinotochka');await until(()=>$('.lp-retry').length>0);w.Lampa.Controller.collectionFocus($('.lp-retry'),$('.lamplay'));w.mock.controllers.content.left();assert.equal($('.focus').attr('data-lp-control'),'source');assert.equal($('.lp-caption').length,2);
+  w.Lampa.Controller.collectionFocus($('.lp-retry'),$('.lamplay'));w.mock.controllers.content.up();assert.equal(w.mock.controller,'head');
   d.window.close();console.log('PASS',view,'stable controls, retained cards, empty source restore and focus');
+ }
+ for(const priority of ['season','voice']){
+  const d=await ui('horizontal',`mock.set('filter_priority','${priority}');const R=Lampa.Reguest;Lampa.Reguest=function(){const r=new R(),req=r.native;r.native=r.silent=(u,ok,fail,data,extra)=>req(u,value=>{if(u.includes('get_cdn_series')&&String(data).includes('translator_id=2')&&value.episodes)value.episodes=value.episodes.split('</li>').filter(row=>!row.includes('data-season_id="1"')).join('</li>');ok(value);},fail,data,extra);return r;};`),w=d.window,$=w.jQuery;
+  w.mock.open();await until(()=>!$('.lamplay').hasClass('lp-loading'));w.mock.click('Сезон 2');await until(()=>!$('.lamplay').hasClass('lp-loading'));w.mock.click('Студия 2');await until(()=>!$('.lamplay').hasClass('lp-loading'));
+  if(priority==='voice'){assert.equal($('[data-count-season="1"]').css('display'),'none');assert.notEqual($('[data-count-voice="1"]').css('display'),'none');}
+  else {w.mock.click('Сезон 1');await until(()=>!$('.lamplay').hasClass('lp-loading'));assert.ok($('[data-count-voice="1"]').hasClass('lp-selected'));assert.notEqual($('[data-count-season="2"]').css('display'),'none');}
+  d.window.close();console.log('PASS priority',priority);
  }
 })().catch(e=>{console.error(e);process.exitCode=1});
