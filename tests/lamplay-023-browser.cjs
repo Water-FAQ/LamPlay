@@ -18,4 +18,4 @@ const {chromium}=require('playwright'),assert=require('assert/strict'),fs=requir
   await p.evaluate(()=>{mock.hold();mock.click('Студия 2');});assert.equal(await p.locator('.lp-skeleton').count(),0);assert.equal(await p.locator('[data-count-season]').count(),2);
   await p.screenshot({path:__dirname+'/renders/023-'+viewport.width+'-'+view+'.png'});assert.deepEqual(errors,[]);await p.close();console.log('PASS scale, screen bounds, neighbour clearance, retained filters',viewport.width,view);
  }}finally{await browser.close();}
-})().catch(e=>{console.error(e);process.exitCode=1});
+})().catch(e=>{console.error(e);process.exit(1)});

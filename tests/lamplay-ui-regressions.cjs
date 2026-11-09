@@ -30,4 +30,4 @@ const {chromium}=require('../node_modules/playwright'),assert=require('assert/st
  await p.evaluate(()=>{jQuery('.selector').removeClass('focus');jQuery('.view--other').addClass('focus');});await p.waitForTimeout(90);assert.ok(await p.locator('.view--lamplay-direct').evaluate(n=>n.classList.contains('focus')));
  await p.keyboard.press('ArrowRight');await p.evaluate(()=>{Lampa.Controller.collectionFocus(jQuery('.view--other'),jQuery('section'));});await p.waitForTimeout(90);assert.ok(await p.locator('.view--other').evaluate(n=>n.classList.contains('focus')));console.log('PASS initial LamPlay focus beats delayed competing selection after 2 seconds and releases on user input');
  assert.deepEqual(errors,[]);await b.close();
-})().catch(e=>{console.error(e);process.exitCode=1;});
+})().catch(e=>{console.error(e);process.exit(1);});

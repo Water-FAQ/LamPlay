@@ -36,4 +36,4 @@ const fs=require('fs'),assert=require('assert/strict');
  });
  const expanded=await page.evaluate(()=>{const b=document.querySelector('.view--lamplay-direct'),s=b.querySelector('span');return getComputedStyle(s).display!=='none' && getComputedStyle(s).opacity==='1' && s.getBoundingClientRect().width>30;});assert.ok(expanded);console.log('PASS card button label remains expanded under actual Lampa styles');
  await browser.close();
-})().catch(e=>{console.error(e);process.exitCode=1});
+})().catch(e=>{console.error(e);process.exit(1)});

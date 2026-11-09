@@ -1636,6 +1636,7 @@
             }
             function fitEpisodeGeometry(){
                 if(geometryRunning || !html[0].isConnected)return;geometryRunning=true;
+                html.css('--lp-inset',Math.max(parseFloat(root.getComputedStyle(html[0]).fontSize)*1.2,root.innerWidth*.018)+'px');
                 var v=resultsVisible?'results':view(),bounds=html[0].getBoundingClientRect();html.removeClass('lp-tight');hero.css('margin-bottom','');filters.children().css({position:'',top:'',zIndex:''});bodyPane.css('padding-bottom','');
                 if(v==='results'){
                     html.css('height',Math.max(120,root.innerHeight-Math.max(0,bounds.top))+'px');
@@ -3441,7 +3442,7 @@
     function start() {
         install(root.Lampa, root.jQuery || root.$);
         (root.jQuery || root.$)('<style id="lamplay-023-style"></style>').text([
-            '.lamplay.lp-series{--lp-inset:max(1.2em,1.8vw)}',
+            '.lamplay{--lp-inset:1.8vw}',
             '.lamplay.lp-series[data-view=horizontal] .lp-episode.focus .lp-picture,.lamplay.lp-series[data-view=horizontal] .lp-episode:focus .lp-picture,.lamplay.lp-series[data-view=card] .lp-episode.focus .lp-picture,.lamplay.lp-series[data-view=card] .lp-episode:focus .lp-picture{transform:scale(1.12);transform-origin:center!important}',
             '.lamplay.lp-series[data-view=vertical] .lp-episode.focus,.lamplay.lp-series[data-view=vertical] .lp-episode:focus{transform:scale(1.035);transform-origin:center}',
             '.lamplay.lp-series[data-view=horizontal] .lamplay__items,.lamplay.lp-series[data-view=card] .lamplay__items{column-gap:calc(1.32vw + .65em)}',
