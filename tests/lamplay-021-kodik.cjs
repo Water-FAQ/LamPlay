@@ -59,7 +59,7 @@ const player=(q,ok)=>ok(q.u.includes('add-players')?'token="'+A+'"':{allowed:1,l
  const check=()=>{w.mock.parameter('kodik_check').onChange();return new Promise(r=>nativeTimer(r,80));};
  await check();assert.ok(item.find('.lp-kodik-token-dot').hasClass('lp-auth-confirmed'));assert.match(item.text(),/действителен/);
  response={error:'Отсутствует или неверный токен'};await check();assert.equal(item.find('.lp-kodik-token-dot').length,1);assert.equal(item.find('.lp-kodik-token-dot').hasClass('lp-auth-confirmed'),false);assert.match(item.text(),/API отклонил/);
- network=true;await check();assert.equal(item.find('.lp-kodik-token-dot').length,0);assert.match(item.text(),/Не удалось проверить/);assert.equal(w.mock.notices.length,0);
+ w.mock.set('proxy_kodik','no');network=true;await check();assert.equal(item.find('.lp-kodik-token-dot').length,0);assert.match(item.text(),/Не удалось проверить/);assert.equal(w.mock.notices.length,0);
  w.mock.set('kodik_token','');param.onChange();assert.match(item.text(),/подобран автоматически/);assert.equal(item.find('.lp-kodik-token-dot').length,0);dom.window.close();
  console.log('PASS settings indicator, dynamic descriptions, edits, blank field and silent switching');
 })().catch(e=>{console.error(e);process.exitCode=1});

@@ -1,3 +1,13 @@
+# LamPlay 0.23.0 — интеграция транспорта
+
+Фиксированный адрес метаданных встроен в плагин, отсутствует в настройках. Подключены маршруты HDRezka search/page/episodes/stream (вход при требовании авторизации), Kodik API и трехшаговый resolve, Filmix TV search/video-links, CDN VideoHub playlist/video и KinoTochka search/find/page/playlist. Пользовательские зеркала передаются в ограниченный контракт Worker. Сервер может отклонить неразрешенное зеркало; произвольный прокси и проксирование медиабайтов отсутствуют.
+
+Автоматический режим начинает с прямого доступа; пустой успешный ответ не вызывает переключения. Явное отклонение токена сохраняет прежнюю логику Kodik. Существующие прямые адаптеры AniLiberty и VeoVeo продолжают использовать свой транспорт, новых пустых подменю не добавлено.
+
+Предыдущие сетевые ограничения Worker (HDRezka 520, CDN VideoHub 503, Filmix TV 403) не объявляются устраненными этой интеграцией. Нужна пользовательская проверка на устройстве. Кандидаты AnimeLib/Aniboom еще не включены в общий список провайдеров; AnimeGO обновлен до animego.me.
+
+---
+
 # Cloudflare: расширение подготовки — 08.11.2026
 
 Пакет Worker 0.2.0-preparation: HDRezka search/page/episodes/stream, Kodik search/list/get-player/page/трехшаговый resolve, Filmix TV/site/mobile, KinoTochka search/find/page/playlist. Персональные токены и явно переданная существующая cookie HDRezka — только POST JSON к Worker и без общего кэша/хранения. Логин HDRezka не проксируется, HTTP для Filmix с токеном не поддерживается. Синтетические тесты не означают подтвержденную работу upstream из Cloudflare. Постоянный lamplay.js не изменен. Контракт и ограничения: [cloudflare/docs/SOURCES-API.md](cloudflare/docs/SOURCES-API.md).

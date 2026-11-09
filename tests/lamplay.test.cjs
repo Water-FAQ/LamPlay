@@ -83,7 +83,8 @@ test('Kodik rotated base64 stream decode preserves direct HTTPS', () => {
 });
 test('Source challenge pages produce explicit error', () => assert.throws(()=>C.parseRezkaSearch('Just a moment cf-chl-test','https://rezka.test'),/защиты/));
 test('Independent implementation contains no proxy endpoints, eval or remote code loading', () => {
-    assert.ok(!/\beval\s*\(|\bnew Function\s*\(|putScript\s*\(|createElement\(['"]script|workers\.dev|deno\.net|proxy\.html|remote_plugin\./.test(source));
+    assert.ok(!/\beval\s*\(|\bnew Function\s*\(|putScript\s*\(|createElement\(['"]script|deno\.net|proxy\.html|remote_plugin\./.test(source));
+    assert.ok(!/https:\/\/[^'"\s]*workers\.dev/.test(source.replaceAll('https://lamplay-metadata.waterfaq.workers.dev','')));
 });
 test('Boolean settings accept Lampa string values', () => {
     assert.equal(C.flag('false',true),false);assert.equal(C.flag('true'),true);assert.equal(C.flag(null,true),true);
