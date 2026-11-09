@@ -28,7 +28,7 @@ async function ui(view='horizontal',setup=''){
   assert.equal($('.lp-episode').length,0);assert.ok($('.lp-empty').text().includes('Ничего не найдено'));assert.ok($('.lp-tools').text().includes('CDN VideoHub'));assert.ok($('.focus').length);
   w.eval(`const OldRequest=Lampa.Reguest;Lampa.Reguest=function(){const r=new OldRequest(),native=r.native;r.native=r.silent=(url,ok,fail,...args)=>url.includes('kinovibe.cc')?setTimeout(()=>fail({status:403},'error'),1):native(url,ok,fail,...args);return r;};`);
   source('kinotochka');await until(()=>$('.lp-retry').length>0);w.Lampa.Controller.collectionFocus($('.lp-retry'),$('.lamplay'));w.mock.controllers.content.left();assert.equal($('.focus').attr('data-lp-control'),'source');assert.equal($('.lp-caption').length,2);
-  w.Lampa.Controller.collectionFocus($('.lp-retry'),$('.lamplay'));w.mock.controllers.content.up();assert.equal(w.mock.controller,'head');
+  w.Lampa.Controller.collectionFocus($('.lp-retry'),$('.lamplay'));w.mock.controllers.content.up();assert.ok($('.lp-filters .focus,.lp-tools .focus,.lp-hero .focus').length);for(let i=0;i<5&&w.mock.controller!=='head';i++)w.mock.controllers.content.up();assert.equal(w.mock.controller,'head');
   d.window.close();console.log('PASS',view,'stable controls, retained cards, empty source restore and focus');
  }
  for(const priority of ['season','voice']){

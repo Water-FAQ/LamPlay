@@ -2298,7 +2298,7 @@
                 function nearest(candidates,axis){var r=current[0].getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2,best=null,score=Infinity;
                     candidates.each(function(){if(this===current[0])return;var t=this.getBoundingClientRect();if(!t.width || !t.height)return;var dx=t.left+t.width/2-cx,dy=t.top+t.height/2-cy;if(axis==='up' && dy>=-4 || axis==='down' && dy<=4 || axis==='left' && dx>=-4 || axis==='right' && dx<=4)return;var val=(axis==='up'||axis==='down')?Math.abs(dy)+Math.abs(dx)*.35:Math.abs(dx)+Math.abs(dy)*.35;if(val<score){score=val;best=this;}});return best;}
                 function focus(target){if(target){Lampa.Controller.collectionFocus(target,html);return true;}return false;}
-                if(current.hasClass('lp-retry')){if(dir==='up')Lampa.Controller.toggle('head');else focus(controlTarget('source')[0]);return;}
+                if(current.hasClass('lp-retry')){focus((dir==='up'?nearest(filters.add(tools).add(hero).find('.selector'),'up'):null) || controlTarget('source')[0]);return;}
                 if(resultsVisible && !errorMessage){
                     var rows=body.find('.lp-result'),controls=tools.find('.selector');
                     if(current.hasClass('lp-result')){
