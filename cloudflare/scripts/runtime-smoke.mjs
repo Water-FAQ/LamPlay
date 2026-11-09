@@ -31,7 +31,7 @@ try {
   assert.equal(denied.status, 403);
   const preflight=await fetch('http://127.0.0.1:8799/v1/kodik/search',{method:'OPTIONS',headers:{Origin:'http://lampa.mx','Access-Control-Request-Method':'POST','Access-Control-Request-Headers':'content-type'}});
   assert.equal(preflight.status,204);
-  for(const path of ['/v1/kodik/search','/v1/rezka/episodes']){
+  for(const path of ['/v1/kodik/search','/v1/rezka/episodes','/v1/rezka/login']){
     const invalid=await fetch('http://127.0.0.1:8799'+path,{method:'POST',headers:{Origin:'http://lampa.mx','Content-Type':'application/json'},body:'{}'});
     assert.equal(invalid.status,400);assert.equal((await invalid.json()).error.code,'invalid_parameters');
   }

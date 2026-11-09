@@ -3,15 +3,15 @@
 import { HttpError } from './errors.mjs';
 
 const policies = {
-  'rezka/search': ['GET', 'POST'], 'rezka/page': ['GET', 'POST'],
+  'rezka/login': ['POST'], 'rezka/search': ['GET', 'POST'], 'rezka/page': ['GET', 'POST'],
   'rezka/episodes': ['POST'], 'rezka/stream': ['POST'],
   'kodik/search': ['POST'], 'kodik/list': ['POST'], 'kodik/get-player': ['POST'],
   'kodik/integration-script': ['GET'], 'kodik/page': ['GET'], 'kodik/resolve': ['POST'],
   'filmix/search': ['GET'], 'filmix/video-links': ['GET'], 'filmix/suggestions': ['GET'],
   'filmix/mobile/search': ['POST'], 'filmix/mobile/post': ['POST'],
   'filmix/mobile/profile': ['POST'], 'filmix/mobile/token-request': ['POST'],
-  'kinotochka/search': ['GET'], 'kinotochka/find': ['GET'],
-  'kinotochka/page': ['GET'], 'kinotochka/playlist': ['GET']
+  'kinotochka/search': ['GET', 'POST'], 'kinotochka/find': ['GET', 'POST'],
+  'kinotochka/page': ['GET', 'POST'], 'kinotochka/playlist': ['GET', 'POST']
 };
 export function sourcePolicy(path) {
   const key = path.replace(/^\/v1\//, '');
@@ -43,6 +43,20 @@ function origin(env, key, fallback) {
     return u.origin;
   } catch { throw new HttpError(503, 'invalid_configuration'); }
 }
+function selectedMirror(env, source, value) {
+  const key = source === 'rezka' ? 'REZKA' : 'KINOTOCHKA';
+  const fallback = source === 'rezka' ? 'https://rezka.ag' : 'https://kinovibe.cc';
+  const configured = origin(env, key + '_ORIGIN', fallback);
+  if (value === undefined || value === '') return configured;
+  if (typeof value !== 'string') bad();
+  let candidate;
+  try { candidate = origin({ MIRROR: value }, 'MIRROR', fallback); }
+  catch { bad(); }
+  const defaults = source === 'rezka' ? ['https://rezka.ag', 'https://standby-rezka.tv', 'https://kvk.zone'] : ['https://kinovibe.cc', 'https://kinovibe.vip'];
+  const allowed = [configured, ...defaults, ...String(env[key + '_ALLOWED_MIRRORS'] || '').split(',').map(s => s.trim()).filter(Boolean)];
+  if (!allowed.includes(candidate)) throw new HttpError(403, 'mirror_not_allowed');
+  return candidate;
+}
 function pagePath(value) {
   const path = str(value);
   return path.length <= 350 && /^\/(?:[a-z0-9_-]+\/)*[1-9]\d*[-a-z0-9_]*\.html$/i.test(path) ? path : bad();
@@ -64,11 +78,17 @@ export function resolveSourceRoute(url, env = {}, method = 'GET', body) {
   if (!policy) throw new HttpError(404, 'route_not_found');
   if (!policy.methods.includes(method)) throw new HttpError(405, 'method_not_allowed');
   const source = policy.source;
-  const fields = (names) => params(url, method === 'POST' ? body : undefined, names);
+  const fields = (names) => params(url, method === 'POST' ? body : undefined, ['rezka','kinotochka'].includes(source) ? [...names, 'mirror'] : names);
+  const mirror = ['rezka','kinotochka'].includes(source) ? (body === undefined ? url.searchParams.get('mirror') ?? undefined : body?.mirror) : undefined;
   let p;
   if (source === 'rezka') {
-    const host = origin(env, 'REZKA_ORIGIN', 'https://rezka.ag');
+    const host = selectedMirror(env, source, mirror);
     const headers = { Origin: host, Referer: host + '/', 'X-Requested-With': 'XMLHttpRequest' };
+    if (url.pathname.endsWith('/login')) {
+      p = fields(['login', 'password']);
+      if (method !== 'POST' || typeof p.login !== 'string' || !p.login.trim() || p.login.length > 320 || /[\x00-\x1f\x7f]/.test(p.login) || typeof p.password !== 'string' || !p.password || p.password.length > 1024 || /[\x00-\x1f\x7f]/.test(p.password)) bad();
+      return { ...spec(source, host + '/ajax/login/', 'rezka-login', headers, { login_name: p.login.trim(), login_password: p.password, login_not_save: '0' }), flow: 'rezka-login' };
+    }
     const withCookie = p => { const c = cookie(p.sessionCookie); if (c) headers.Cookie = c; };
     if (url.pathname.endsWith('/search')) {
       p = fields(['q', 'sessionCookie']); withCookie(p);
@@ -146,18 +166,24 @@ export function resolveSourceRoute(url, env = {}, method = 'GET', body) {
     // This URL is sent to the configured HTTPS API only, never logged or shared-cached.
     return spec(source, host + '/api/v2/' + path + '?' + new URLSearchParams(values), 'filmix-mobile-' + operation, { 'User-Agent': 'okhttp/3.10.0' });
   }
-  const host = origin(env, 'KINOTOCHKA_ORIGIN', 'https://kinovibe.cc');
+  const host = selectedMirror(env, source, mirror);
   if (url.pathname.endsWith('/find')) { p = fields(['kp']); return spec(source, host + '/api/find-by-kinopoisk.php?' + new URLSearchParams({ kinopoisk: id(p.kp) }), 'kinotochka-find'); }
   if (url.pathname.endsWith('/search')) { p = fields(['q']); return spec(source, host + '/index.php?do=search', 'source-html', { Referer: host + '/' }, { do: 'search', subaction: 'search', search_start: '0', full_search: '0', result_from: '1', story: q(p.q) }); }
   if (url.pathname.endsWith('/page')) { p = fields(['path']); return spec(source, host + pagePath(p.path), 'source-html'); }
   p = fields(['path']);
   const path = str(p.path);
   if (path.length > 350 || !/^\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.(?:txt|json)$/.test(path)) bad();
-  return spec(source, origin(env, 'KINOTOCHKA_PLAYLIST_ORIGIN', host) + path, 'kinotochka-playlist');
+  return spec(source, (mirror ? host : origin(env, 'KINOTOCHKA_PLAYLIST_ORIGIN', host)) + path, 'kinotochka-playlist');
 }
 
 const obj = v => v && typeof v === 'object' && !Array.isArray(v);
 export function transformSource(text, spec) {
+  if (spec.source === 'rezka' && spec.format === 'source-html' && !spec.allowLoginPage && /id=["']loginForm["']/.test(text) && !/href=["'][^"']*\/logout\//.test(text)) throw new HttpError(401, 'source_auth_required');
+  if (spec.format === 'rezka-login') {
+    let data; try { data = JSON.parse(text); } catch { throw new HttpError(502, 'upstream_shape_changed'); }
+    if (data.success !== true && data.success !== 1) throw new HttpError(401, 'source_login_rejected');
+    return { body: '{"success":true}', mime: 'application/json; charset=utf-8' };
+  }
   if (['source-html','source-script'].includes(spec.format)) return { body: text, mime: 'text/plain; charset=utf-8' };
   let d;
   try { d = JSON.parse(text.replace(/^\uFEFF/, '')); } catch { throw new HttpError(502, 'upstream_shape_changed'); }
@@ -223,4 +249,29 @@ export async function resolveKodik(spec, step) {
   }
   if (!Object.keys(quality).length) throw new HttpError(502, 'upstream_no_streams');
   return { body: JSON.stringify({ quality, subtitles: [] }), mime: 'application/json; charset=utf-8', cacheable: false };
+}
+
+// Session exists only in this request and in the caller's mirror-specific memory.
+export async function loginRezka(spec, step) {
+  const host = new URL(spec.target).origin;
+  const jar = new Map();
+  function merge(entry) {
+    for (const line of entry.cookies || []) {
+      const parts = line.split(';'), pair = parts.shift().trim(), at = pair.indexOf('=');
+      const name = pair.slice(0, at), value = pair.slice(at + 1);
+      if (at < 1 || !/^[a-zA-Z0-9_-]+$/.test(name) || !/^[\x21-\x3a\x3c-\x7e]*$/.test(value)) continue;
+      const domain = parts.find(p => /^\s*domain=/i.test(p))?.split('=')[1]?.trim().replace(/^\./, '').toLowerCase();
+      const hostname = new URL(host).hostname;
+      if (domain && hostname !== domain && !hostname.endsWith('.' + domain)) continue;
+      if (parts.some(p => /^\s*max-age=0\s*$/i.test(p)) || value === 'deleted') jar.delete(name); else jar.set(name, value);
+    }
+  }
+  const header = () => [...jar].map(([k,v]) => k + '=' + v).join('; ');
+  merge(await step({ ...spec, target: host + '/', format: 'source-html', allowLoginPage: true, method: 'GET', body: undefined, flow: undefined, captureCookies: true }));
+  merge(await step({ ...spec, flow: undefined, captureCookies: true, headers: { ...spec.headers, Cookie: header() } }));
+  const sessionCookie = header();
+  if (!sessionCookie || sessionCookie.length > 4096) throw new HttpError(502, 'source_session_unconfirmed');
+  const page = await step({ ...spec, target: host + '/', method: 'GET', body: undefined, format: 'source-html', flow: undefined, headers: { ...spec.headers, Cookie: sessionCookie } });
+  if (!/href=["'][^"']*\/logout\//.test(page.body)) throw new HttpError(502, 'source_session_unconfirmed');
+  return { body: JSON.stringify({ success: true, mirror: host, sessionCookie }), mime: 'application/json; charset=utf-8', cacheable: false };
 }

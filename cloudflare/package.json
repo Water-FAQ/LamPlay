@@ -1,11 +1,11 @@
 {
   "name": "lamplay-metadata-worker",
-  "version": "0.2.2-testing",
+  "version": "0.3.0-testing",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "check": "node --check src/worker.mjs && node --check src/core.mjs && node --check src/routes.mjs && node --check src/source-routes.mjs && node --check client/transport.js && node --check scripts/probe-worker.mjs",
+    "check": "node --check src/worker.mjs && node --check src/core.mjs && node --check src/routes.mjs && node --check src/source-routes.mjs && node --check client/transport.js && node --check client/direct.js && node --check client/catalog.js && node --check scripts/probe-worker.mjs",
     "dry-run": "wrangler deploy --dry-run --outdir .build",
     "deploy": "wrangler deploy"
   },

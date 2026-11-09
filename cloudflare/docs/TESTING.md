@@ -1,3 +1,11 @@
+## Актуализация 0.3.0-testing
+
+Добавлен POST /v1/rezka/login с JSON `{login,password,mirror?}`. Возвращает `{success:true,mirror,sessionCookie}` только после проверки сессии. Поля login/password запрещено передавать через GET; значения и cookies не хранятся/не логируются. sessionCookie передается в последующих POST только тому же mirror. Клиент держит его только в памяти.
+
+HDRezka и KinoTochka принимают mirror из настроек LamPlay (rezka_host / kinotochka_host); KinoTochka теперь допускает GET и POST. Поддерживаются HTTPS origins из конфигурации/разрешенного списка. Для HDRezka проверены rezka.ag, standby-rezka.tv, kvk.zone; для KinoTochka kinovibe.cc и kinovibe.vip. Произвольные хосты не разрешаются. Для добавления другого настроенного пользователем зеркала оператор указывает его в REZKA_ALLOWED_MIRRORS / KINOTOCHKA_ALLOWED_MIRRORS. Основной серверный REZKA_ORIGIN изменен на standby-rezka.tv, явный mirror имеет приоритет.
+
+Новые ошибки: source_auth_required, source_login_rejected, source_session_unconfirmed, mirror_not_allowed, source_video_blocked. Прямой резерв CVH/Filmix выполняется подготовленным клиентом один раз, без токенов/сессий. Старые описания ниже сохранены как история подготовки и в противоречащих пунктах заменены этим разделом. Текущий плагин не подключен.
+
 # Тестирование после пробной публикации
 
 Сначала выполнить SETUP.md и развернуть Worker в своем аккаунте. Текущий плагин не меняется. Пакет по умолчанию не включает ни один источник; включать по одному через ENABLED_SOURCES и ручную публикацию. /health показывает включенные имена.

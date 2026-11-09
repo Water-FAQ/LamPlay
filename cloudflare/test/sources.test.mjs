@@ -39,11 +39,11 @@ test('HDRezka explicit cookie stays in its own request and is never cached or re
   assert.equal(headers.get('Cookie'),null); assert.equal(cacheCalls,0);
 });
 
-test('operator mirror changes target; client host and login routes are rejected', async () => {
+test('operator mirrors work; arbitrary hosts and login GET are rejected', async () => {
   assert.equal(new URL(route('/v1/rezka/search?q=Example',undefined,{ REZKA_ORIGIN:'https://mirror.example.org' }).target).origin,'https://mirror.example.org');
   for (const value of ['http://mirror.example.org','https://127.0.0.1','https://example.org/private','https://user:pass@example.org','https://example.org:8080']) assert.throws(() => route('/v1/rezka/search?q=Example',undefined,{ REZKA_ORIGIN:value }));
   const worker=createWorker({fetcher:()=>{throw new Error('unexpected network');}});
-  for (const path of ['/v1/rezka/search?q=Example&host=https://evil.example','/v1/rezka/page?path=//evil.example/123-x.html','/v1/rezka/login','/v1/rezka/page?path=/ajax/login/','/v1/rezka/page?path=/123-example.html&sessionCookie=x%3Dy']) assert.ok([400,404].includes((await worker.fetch(request(path),env)).status));
+  for (const path of ['/v1/rezka/search?q=Example&host=https://evil.example','/v1/rezka/page?path=//evil.example/123-x.html','/v1/rezka/login','/v1/rezka/page?path=/ajax/login/','/v1/rezka/page?path=/123-example.html&sessionCookie=x%3Dy']) assert.ok([400,404,405].includes((await worker.fetch(request(path),env)).status));
 });
 
 test('Kodik API token uses POST body and secret query params are rejected', async () => {

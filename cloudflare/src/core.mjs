@@ -1,7 +1,7 @@
 import { HttpError, SOURCES, resolveRoute, transform } from './routes.mjs';
-import { sourcePolicy, resolveKodik } from './source-routes.mjs';
+import { sourcePolicy, resolveKodik, loginRezka } from './source-routes.mjs';
 
-export const VERSION = '0.2.2-testing';
+export const VERSION = '0.3.0-testing';
 const MAX_BYTES = 1024 * 1024;
 const TIMEOUT_MS = 12000;
 const csv = value => String(value || '').split(',').map(v => v.trim()).filter(Boolean);
@@ -64,7 +64,10 @@ async function upstreamRequest(spec, fetcher, signal) {
     throw new HttpError(502, 'upstream_redirect');
   }
   if (!upstream.ok) {
-    await upstream.body?.cancel();
+    if (spec.source === 'filmix' && upstream.status === 403) {
+      let denied; try { denied = JSON.parse(await readBounded(upstream, 8192)); } catch {}
+      if (typeof denied?.message === 'string' && /видео заблокировано/i.test(denied.message)) throw new HttpError(403, 'source_video_blocked', 403);
+    } else await upstream.body?.cancel();
     if (spec.source === 'kodik' && ['kodik-api','kodik-get-player'].includes(spec.format) && upstream.status === 401) throw new HttpError(401, 'source_token_rejected');
     throw new HttpError(upstream.status === 429 ? 503 : 502, upstream.status === 401 || upstream.status === 403 ? 'upstream_denied' : 'upstream_http_error', upstream.status);
   }
@@ -78,7 +81,7 @@ async function upstreamRequest(spec, fetcher, signal) {
   const text = await readBounded(upstream);
   const transformed = transform(text, spec);
   const noCache = /(?:private|no-store|no-cache)/i.test(upstream.headers.get('Cache-Control') || '') || upstream.headers.has('Set-Cookie');
-  return { ...transformed, cacheable: !noCache };
+  return { ...transformed, cacheable: !noCache, ...(spec.captureCookies ? { cookies: typeof upstream.headers.getSetCookie === 'function' ? upstream.headers.getSetCookie() : typeof upstream.headers.getAll === 'function' ? upstream.headers.getAll('Set-Cookie') : [] } : {}) };
 }
 
 export function createWorker({ fetcher = (...args) => fetch(...args), cache, timeoutMs = TIMEOUT_MS } = {}) {
@@ -147,7 +150,7 @@ export function createWorker({ fetcher = (...args) => fetch(...args), cache, tim
             if (steps > 1 && !(await env.SOURCE_LIMITER.limit({ key: 'source:' + source })).success) throw new HttpError(429, 'rate_limited');
             return upstreamRequest(entry, fetcher, controller.signal);
           };
-          const task = spec.flow === 'kodik-resolve' ? resolveKodik(spec, step) : step(spec);
+          const task = spec.flow === 'rezka-login' ? loginRezka(spec, step) : spec.flow === 'kodik-resolve' ? resolveKodik(spec, step) : step(spec);
           const expired = new Promise((_, reject) => { timeout = setTimeout(() => { reject(new HttpError(504, 'upstream_timeout')); controller.abort(); }, spec.flow ? 25000 : timeoutMs); });
           const data = await Promise.race([task, expired]);
           if (spec.ttl && data.cacheable && store && ctx.waitUntil) {
