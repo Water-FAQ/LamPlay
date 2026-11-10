@@ -245,5 +245,56 @@
         "hls": true
       }
     ]
-  }
+  },
+  "additionalChecks": [
+    {
+      "name": "rezka-mirror-standby-rezka.tv",
+      "status": 502,
+      "bytes": 61,
+      "error": "upstream_http_error"
+    },
+    {
+      "name": "rezka-mirror-kvk.zone",
+      "status": 502,
+      "bytes": 61,
+      "error": "upstream_http_error"
+    },
+    {
+      "name": "kino-find",
+      "status": 200,
+      "bytes": 124
+    },
+    {
+      "name": "kino-page",
+      "status": 200,
+      "bytes": 107362
+    },
+    {
+      "name": "kino-open-player",
+      "found": true
+    },
+    {
+      "name": "kodik-resolve",
+      "status": 200,
+      "bytes": 757
+    },
+    {
+      "name": "kodik-manifest",
+      "status": 200,
+      "bytes": 11068
+    },
+    {
+      "name": "kodik-first-segment",
+      "status": 200,
+      "bytes": 16384,
+      "type": "application/octet-stream"
+    },
+    {
+      "name": "kino-media",
+      "status": 206,
+      "bytes": 4096,
+      "type": "video/mp4",
+      "host": "svd13.kvb.cool"
+    }
+  ]
 }
