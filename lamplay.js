@@ -1,10 +1,10 @@
-/* LamPlay by WaterFAQ - 0.24.0 (experimental)
+/* LamPlay by WaterFAQ - 0.25.0 (experimental)
  * Independent Lampa plugin. Optional fixed metadata proxy; no remote code execution.
  * Providers: HDrezka, Kodik, AniLiberty, Filmix, CDN VideoHub, KinoTochka, VeoVeo.
  */
 (function (root) {
     'use strict';
-    var VERSION = '0.24.0';
+    var VERSION = '0.25.0';
     var RELEASE_DATE = '10.11.2026';
     var KEY = 'lamplay';
     var NAME = 'LamPlay';
@@ -298,7 +298,7 @@
         }else if(host==='api.filmix.tv'){
             source='filmix';if(path==='/api-fx/list'){route='search';p={q:p.search};}else if(/\/video-links$/.test(path)){route='video-links';p={id:path.split('/')[3]};}
         }else if(host==='filmix.gg' && path==='/api/v2/suggestions'){source='filmix';route='suggestions';p={q:p.search_word};
-        }else if(host==='filmixapp.cyou' && /^\/api\/v2\//.test(path)){
+        }else if(/^(?:filmixapp\.cyou|filmixapp\.vip|fxapp\.biz)$/.test(host) && /^\/api\/v2\//.test(path)){
             source='filmix';var operation=path.slice(8);route='mobile/'+(operation.indexOf('post/')===0?'post':operation==='user_profile'?'profile':operation==='token_request'?'token-request':operation);var raw=p;p={deviceId:raw.user_dev_id};if(operation!=='token_request')p.token=raw.user_dev_token;if(operation==='search')p.q=raw.story;if(operation.indexOf('post/')===0)p.id=operation.split('/')[1];
         }else if(host==='kodik-api.com'){
             source='kodik';route=path.replace(/^\//,'');var allowed=['token','title','year','shikimori_id','kinopoisk_id','imdb_id','limit','next','id','with_episodes','with_seasons','shikimoriID','kinopoiskID','imdbID'];Object.keys(p).forEach(function(k){if(allowed.indexOf(k)<0)delete p[k];});
@@ -329,7 +329,7 @@
         this.request = function (url, data, type, done, fail, extra) {
             var mapped=workerRoute(url,data,settings),mode=mapped?settings('proxy_'+mapped.source,mapped.source==='filmix'?'no':'auto'):'no',workerTried=false,authenticated=false;
             if(extra && extra.workerRoute)mapped=extra.workerRoute;
-            if(extra && extra.workerOnly)mode='yes';
+            if(extra && extra.workerOnly){if(!mapped)return fail(new Error('Для этого адреса источника проксирование не поддерживается.'));mode='yes';}if(extra && extra.directOnly)mode='no';
             var directDone=done,directFail=fail,workerTicket=generation;
             function worker(){
                 workerTried=true;var xhr=new root.XMLHttpRequest(),entry={request:{clear:function(){xhr.abort();}}};pending.push(entry);
@@ -944,11 +944,29 @@
             },fail);
         }
 
+        var activeApi='';
         function api(path,params,done,fail,authToken) {
-            var host=hostSetting(settings('filmix_host',''),'http://filmixapp.cyou').replace(/\/api\/v2$/i,'');
+            var configured=hostSetting(settings('filmix_host',''),'http://filmixapp.cyou').replace(/\/api\/v2$/i,''),mode=settings('proxy_filmix','no');
+            var known=['http://filmixapp.cyou','http://filmixapp.vip','http://fxapp.biz'];
+            var hosts=[activeApi || configured];if(hosts.indexOf(configured)<0)hosts.push(configured);
+            if(known.indexOf(configured)>=0)known.forEach(function(h){if(hosts.indexOf(h)<0)hosts.push(h);});
             var query={user_dev_id:dev,user_dev_name:'Xiaomi',user_dev_token:authToken===undefined?token():authToken,user_dev_vendor:'Xiaomi',user_dev_os:'7.1.1',user_dev_apk:'2.2.9',app_lang:'ru_RU'};
             Object.keys(params||{}).forEach(function(k){query[k]=params[k];});
-            io.request(host+'/api/v2/'+path+'?'+form(query),null,'json',function(data){if(data && data.error){var e=data.error;return fail(new Error('Filmix: '+(e.user_message || e.message || 'API отклонил запрос')));}done(data);},function(e){fail(new Error('Filmix ('+path+'): '+safeError(e)));},{headers:{'User-Agent':'okhttp/3.10.0'},nativeOnlyHeaders:true});
+            var ticket=io.epoch?io.epoch():null,workerUsed=false;
+            function live(){return ticket===null || io.epoch()===ticket;}
+            function attempt(last){
+                if(!live())return;
+                var worker=mode==='yes' || !hosts.length && mode==='auto' && !workerUsed;
+                if(worker && workerUsed || !worker && !hosts.length)return fail(last || new Error('Filmix: API недоступен.'));
+                var host=worker?configured:hosts.shift();if(worker)workerUsed=true;
+                var extra={headers:{'User-Agent':'okhttp/3.10.0'},nativeOnlyHeaders:true,directOnly:!worker,workerOnly:worker};
+                io.request(host+'/api/v2/'+path+'?'+form(query),null,'json',function(data){
+                    if(!live())return;
+                    if(data && data.error){var e=data.error;return fail(new Error('Filmix: '+(e.user_message || e.message || 'API отклонил запрос')));}
+                    if(!data || typeof data!=='object')return attempt(new Error('Filmix: неполный ответ '+path));
+                    if(!worker)activeApi=host;done(data);
+                },function(e){if(!live())return;if(worker || e && e.httpStatus===401)return fail(new Error('Filmix ('+path+'): '+safeError(e)));attempt(e);},extra);
+            }attempt();
         }
         this.search=function(query,movie,done,fail){
             function display(rows){done(rank(rows.map(function(r){return {id:r.id,title:r.title,original:r.orig_title || r.original_title || r.original_name,year:r.year,description:r.short_story};}),movie));}
@@ -1308,6 +1326,7 @@
         }
         if (pane.classList.contains('lp-strip') || pane.classList.contains('lp-tools') && !pane.closest('.lamplay').classList.contains('lp-columns') || pane.classList.contains('lp-body-pane') && (target.classList.contains('lp-episode') || target.classList.contains('lp-result'))) {
             var horizontal=!pane.classList.contains('lp-body-pane') || !pane.closest('.lamplay').classList.contains('lp-columns');
+            if(pane.classList.contains('lp-strip')){var next=rect.left<box.left+gap?pane.scrollLeft+rect.left-box.left-gap:rect.right>box.right-gap?pane.scrollLeft+rect.right-box.right+gap:pane.scrollLeft;if(Math.abs(next-pane.scrollLeft)>1)animatePane(pane,Math.max(0,Math.min(next,pane.scrollWidth-pane.clientWidth)),true);return;}
             var dest=horizontal?pane.scrollLeft+rect.left-box.left+(rect.width-pane.clientWidth)/2:pane.scrollTop+rect.top-box.top+(rect.height-pane.clientHeight)/2;
             dest=Math.max(0,Math.min(dest,horizontal?pane.scrollWidth-pane.clientWidth:pane.scrollHeight-pane.clientHeight));
             animatePane(pane,dest,horizontal);
@@ -1729,7 +1748,7 @@
                 metadata=state.metadata;metadataPending=false;if(!metadata.id)metadata.signature='';catalogSeasons=state.catalog;countRows=state.countRows;countKnown=state.countKnown;countPending=state.countPending;countRelease=release;countSource=id;reverse=state.reverse;
                 lastEpisodeKey=state.lastEpisode;lastControl=state.lastControl;busy=false;finish();
                 body.empty();refreshControls();renderHero();
-                if(state.error){retryAction=search;failed(new Error(state.error));}
+                if(state.error && !(state.results && !state.results.length)){retryAction=search;failed(new Error(state.error));}
                 else if(resultsVisible){showResults();last=body.find('.lp-result')[Math.max(0,state.resultIndex)] || last;self.start();}else if(release){renderEpisodes(state.lastEpisode);bodyPane[0].scrollLeft=state.scrollX;bodyPane[0].scrollTop=state.scrollY;}else showResults();
                 setTimeout(function(){if(!destroyed && source.id===id && resultsVisible){bodyPane[0].scrollLeft=state.scrollX;bodyPane[0].scrollTop=state.scrollY;}},0);
             }
@@ -1778,7 +1797,7 @@
                 }pump();
             }
             function refreshControls() {
-                var restoreControl=lastControl;tools.empty();filters.empty();
+                var restoreControl=lastControl,stripOffsets=filters.find('.lp-strip').toArray().map(function(n){return n.scrollLeft;});filters.find('.lp-strip').each(function(){if(this._lpScrollFrame)root.cancelAnimationFrame(this._lpScrollFrame);});tools.empty();filters.empty();
                 if (release && series() && !busy) {
                     var seasons = seasonList();
                     var seasonStrip = $('<div class="lp-strip-group"><div class="lp-caption">Сезоны</div><div class="lp-scroll lp-strip"></div></div>');
@@ -1799,7 +1818,7 @@
                 control('Сбросить фильтр',function () {query=initialQuery;pendingResume=null;if(source.clearCache)source.clearCache();search();});
                 control(query,searchMenu).empty().text(query).wrapInner('<span class="lp-control-value"></span>').attr({'aria-label':'Поиск: '+query,'data-lp-control':'search'}).addClass('lp-search').prepend('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/></svg>');
                 if (!resultsVisible){var resultButton=control('К результатам',function(){if(results)backToResults();});if(!results)resultButton.removeClass('selector').attr({'aria-disabled':'true',tabindex:'-1'});}
-                layout();if(!busy)updateCounts();if(restoreControl) {var restored=controlTarget(restoreControl);if(restored.length) last=restored[0];}
+                layout();if(!busy)updateCounts();filters.find('.lp-strip').each(function(i){this.scrollLeft=stripOffsets[i]||0;});if(restoreControl) {var restored=controlTarget(restoreControl);if(restored.length) last=restored[0];}
             }
             function search() {
                 release=null;resultSelected=null;voice=null;episodes=[];catalogSeasons=[];results=null;body.empty();
@@ -1836,7 +1855,7 @@
             function pumpOriginals(){if(destroyed||!resultsVisible)return;while(originalRunning<3 && resultOriginalQueue.length){originalRunning++;resultOriginalQueue.shift()(function(){originalRunning--;pumpOriginals();});}}
             function showResults() {resultOriginalQueue=[];originalRunning=0;
                 resultsVisible=!!(results && results.length);body.empty();refreshControls();renderHero();
-                setStatus('');if(!results || !results.length){status.detach().appendTo(bodyPane).addClass('lp-error lp-empty').removeClass('lp-busy').show();statusText.text('Ничего не найдено. Измените запрос или источник.');lastControl='source';}
+                setStatus('');if(!results || !results.length){status.detach().appendTo(bodyPane).addClass('lp-error lp-empty').removeClass('lp-busy').show();statusText.text('Ничего не найдено. Измените запрос или источник.');lastControl='source';errorMessage='Ничего не найдено. Измените запрос или источник.';}
                 (results||[]).forEach(function (r) {
                     var node=interactive($('<div class="lamplay__item lp-result"></div>'),function () {openRelease(r);});
                     var info=$('<div class="lp-result-info"></div>').append($('<div class="lamplay__item-title"></div>').text(r.title));
@@ -1847,7 +1866,7 @@
                     node.append('<svg class="lp-folder" viewBox="0 0 32 32" fill="currentColor" aria-hidden="true"><path d="M3 7h10l3 3h13v17H3Z"/><path opacity=".5" d="M5 4h9l3 3h10v3H5Z"/></svg>',info);
                     body.append(node);
                 });
-                last=body.find('.selector')[0] || tools.find('.selector')[0];pumpOriginals();self.start();
+                last=body.find('.selector')[0] || controlTarget('source')[0] || tools.find('.selector')[0];pumpOriginals();self.start();
             }
             function backToResults() {changeGeneration();busy=false;pendingResume=null;release=null;voice=null;episodes=[];showResults();}
             function openRelease(result) {
@@ -1912,9 +1931,9 @@
                 if(source.id==='kodik' || release.bundle){var ticket=generation,started=Date.now();function ready(){if(destroyed || ticket!==generation)return;if(metadataPending && Date.now()-started<3000){presentationTimer=setTimeout(ready,30);return;}if(release.bundle && !release.configured){configureBundle(release,metadata.details);release.configured=true;catalogSeasons=release.seasonKeys.slice();season=release.selectedSeason || season;}var s=season || release.initial && release.initial.currentSeason || '1';release.context={seasons:metadata.details.seasons || [],episodes:metadata.seasons};loadSeasonMetadata(s,requestEpisodes);}ready();}else requestEpisodes();
             }
             function prepareEpisodes(restore){
-                var ticket=generation,started=Date.now(),ended=false,assetsStarted=false,countsReady=false,metadataReady=false;
+                var ticket=generation,started=Date.now(),ended=false,assetsStarted=false,countsReady=false,metadataReady=false,revealTimer=null;
                 function live(){return !destroyed && ticket===generation;}
-                function reveal(){if(ended || !live())return;ended=true;clearTimeout(presentationTimer);finish();renderEpisodes(restore);if(pendingScroll){var scroll=pendingScroll;pendingScroll=null;function apply(){if(!live())return;if(bodyPane[0]._lpScrollFrame){setTimeout(apply,20);return;}bodyPane[0].scrollLeft=scroll.x;bodyPane[0].scrollTop=scroll.y;}apply();}resumeWhenReady();}
+                function reveal(){if(ended || !live())return;if(html.hasClass('lp-switching') && Date.now()-started<240){clearTimeout(revealTimer);revealTimer=setTimeout(reveal,240-(Date.now()-started));return;}ended=true;clearTimeout(presentationTimer);finish();renderEpisodes(restore);if(pendingScroll){var scroll=pendingScroll;pendingScroll=null;function apply(){if(!live())return;if(bodyPane[0]._lpScrollFrame){setTimeout(apply,20);return;}bodyPane[0].scrollLeft=scroll.x;bodyPane[0].scrollTop=scroll.y;}apply();}resumeWhenReady();}
                 function assets(){
                     if(!live() || ended || assetsStarted || !countsReady || !metadataReady)return;assetsStarted=true;
                     var rows=visibleEpisodes(),first=0;
@@ -2165,7 +2184,7 @@
                 return {_lpNextTitle:series()?episodeName(ep):v.title,title:series()?(flag(setting('full_episode_title',true),true)?'[S'+ep.season+':E'+ep.number+'] '+episodeName(ep):'Серия '+ep.number):v.title,
                     thumbnail:series()?thumbnail(ep):undefined,card:movie,timeline:view,
                     season:series()?+ep.season:undefined,episode:series()?+ep.number:undefined,
-                    hls_type:source.id==='filmix'?(setting('filmix_hls','auto')==='auto'?(Lampa.Platform.is('webos') && root.MediaSource && root.MediaSource.isTypeSupported && root.MediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E,mp4a.40.2"')?'hlsjs':undefined):setting('filmix_hls','auto')):undefined,_lamplay:state,_lpEpisode:ep,_lpAdjacent:adjacentSeason,subtitles:false};
+                    hls_type:source.id==='filmix'?(setting('filmix_hls','auto')==='auto'?(Lampa.Platform.is('webos')?'native':undefined):setting('filmix_hls','auto')):undefined,_lamplay:state,_lpEpisode:ep,_lpAdjacent:adjacentSeason,subtitles:false};
             }
             var adjacentBusy=false;
             function adjacentSeason(direction){
@@ -2173,11 +2192,11 @@
                 var data=Lampa.Player.playdata(),current=data && data._lpEpisode;if(!current)return;
                 var seasons=seasonList(),at=seasons.indexOf(String(current.season)),selected=seasons[at+direction];if(!selected)return;
                 var provider=source,chosen=voice,expectedRelease=release;adjacentBusy=true;
-                provider.episodes(expectedRelease,chosen,function(rows){adjacentBusy=false;if(release!==expectedRelease || source!==provider)return;
+                provider.episodes(expectedRelease,chosen,function(rows){adjacentBusy=false;if(release!==expectedRelease || source!==provider || Lampa.Player.playdata()!==data)return;
                     var candidates=rows.filter(function(e){return String(e.season)===String(selected) && !e.unavailable && !e.loadSeason;}).sort(function(a,b){return +a.number-+b.number;});
                     if(!candidates.length)return;
                     var ep=direction>0?candidates[0]:candidates[candidates.length-1];
-                    var item=cell(ep);resolveCell(item,function(){season=String(selected);episodes=rows;Lampa.Player.play(item);var playlist=candidates.map(cell);playlist.forEach(function(entry){entry.url=function(callback){resolveCell(entry,callback,function(error){Lampa.Noty.show(safeError(error));callback();});};});Lampa.Player.playlist(playlist);},function(error){Lampa.Noty.show(safeError(error));});
+                    var item=cell(ep);resolveCell(item,function(){if(Lampa.Player.playdata()!==data)return;season=String(selected);episodes=rows;Lampa.Player.play(item);var playlist=candidates.map(cell);playlist.forEach(function(entry){entry.url=function(callback){resolveCell(entry,callback,function(error){Lampa.Noty.show(safeError(error));callback();});};});Lampa.Player.playlist(playlist);},function(error){Lampa.Noty.show(safeError(error));});
                 },function(error){adjacentBusy=false;Lampa.Noty.show(safeError(error));},selected);
             }
             function resolveCell(item,done,fail,mark) {
@@ -2305,16 +2324,16 @@
                 }show();
             }
             function move(dir,fallback) {
-                var current=last && html[0].contains(last)?$(last):html.find('.selector.focus').last();if(!current.length){var recovery=tools.find('.selector').first();if(recovery.length){last=recovery[0];Lampa.Controller.collectionFocus(last,html);}return;}
+                var current=html.find('.selector.focus').last();if(!current.length && last && html[0].contains(last))current=$(last);if(!current.length){var recovery=tools.find('.selector').first();if(recovery.length){last=recovery[0];Lampa.Controller.collectionFocus(last,html);}return;}
                 var filter=current.attr('data-lp-control'), parent=current.parent(), first=parent.children('.selector').first()[0]===current[0];
                 function nearest(candidates,axis){var r=current[0].getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2,best=null,score=Infinity;
                     candidates.each(function(){if(this===current[0])return;var t=this.getBoundingClientRect();if(!t.width || !t.height)return;var dx=t.left+t.width/2-cx,dy=t.top+t.height/2-cy;if(axis==='up' && dy>=-4 || axis==='down' && dy<=4 || axis==='left' && dx>=-4 || axis==='right' && dx<=4)return;var val=(axis==='up'||axis==='down')?Math.abs(dy)+Math.abs(dx)*.35:Math.abs(dx)+Math.abs(dy)*.35;if(val<score){score=val;best=this;}});return best;}
-                function focus(target){if(target){Lampa.Controller.collectionFocus(target,html);return true;}return false;}
+                function focus(target){if(target){focusNode(target);Lampa.Controller.collectionSet(html,false,true);Lampa.Controller.collectionFocus(target,html);return true;}return false;}
                 if(current.hasClass('lp-retry')){focus((dir==='up'?nearest(filters.add(tools).add(hero).find('.selector'),'up'):null) || controlTarget('source')[0]);return;}
                 if(resultsVisible && !errorMessage){
                     var rows=body.find('.lp-result'),controls=tools.find('.selector');
                     if(current.hasClass('lp-result')){
-                        if(dir==='left'){focus(controlTarget(resultFilter)[0] || controls[0]);return;}
+                        if(dir==='left' || dir==='right'){focus(controlTarget(resultFilter)[0] || controlTarget('source')[0] || controls[0]);return;}
                         if(dir==='up' || dir==='down'){var pos=rows.index(current),target=rows[pos+(dir==='up'?-1:1)];if(target)focus(target);else if(dir==='up')Lampa.Controller.toggle('head');return;}
                         if(dir==='right')return;
                     }
@@ -2327,7 +2346,7 @@
                     var destination=controlTarget(returnFilter || 'source')[0] || tools.find('.selector')[0];
                     focus(destination);return;
                 }
-                if(errorMessage && filter && dir==='right' && (listLayout() || resultsVisible)){focus(status.find('.lp-retry')[0]);return;}
+                if(errorMessage && filter && dir==='right' && (listLayout() || resultsVisible) && status.find('.lp-retry').length){focus(status.find('.lp-retry')[0]);return;}
                 if(filter && (parent.hasClass('lp-strip') || parent[0]===tools[0] && !listLayout()) && (dir==='left' || dir==='right')){
                     var sibling=dir==='right'?current.nextAll('.selector').first():current.prevAll('.selector').first();
                     if(sibling.length){focus(sibling[0]);return;}
@@ -2356,6 +2375,7 @@
                 if(dir==='right' && current.hasClass('lp-continue')) {var next=controlTarget(returnFilter);if(!next.length) next=filters.find('.selector').first();if(next.length) {Lampa.Controller.collectionFocus(next,html);return;}}
                 if (root.Navigator.canmove(dir)) root.Navigator.move(dir);else if (fallback) Lampa.Controller.toggle(fallback);
             }
+            this.remoteDirection=function(dir){if(!inActivity())return false;var state=Lampa.Controller.enabled && Lampa.Controller.enabled();if(state && state.name!=='content')return false;if(!resultsVisible && !errorMessage)return false;move(dir,dir==='up'?'head':undefined);return true;};
             this.back=function () {if (busy && !release) return cancel();changeGeneration();buttonBindings.forEach(function(b){b.focusUntil=1;if(b.startComponent && b.direct) b.startComponent.last=b.direct[0];});Lampa.Activity.backward();setTimeout(function(){buttonBindings.forEach(initialFocus);},0);};
             this.pause=function () {releaseBackground();};this.stop=function () {releaseBackground();};
             var resizeHandler=function(){if(inActivity()) syncBackground(resultsVisible?'results':view());fitStrip();};root.addEventListener('resize',resizeHandler);
@@ -2552,6 +2572,7 @@
             '.lamplay.lp-series[data-view=horizontal] .lp-episode-info,.lamplay.lp-series[data-view=card] .lp-episode-info{height:auto!important;min-height:7.2em!important;overflow:visible!important}',
             '.lamplay.lp-series[data-view=horizontal] .lp-description,.lamplay.lp-series[data-view=card] .lp-description{display:-webkit-box!important;-webkit-box-orient:vertical;-webkit-line-clamp:3!important;height:auto!important;max-height:3.9em;overflow:hidden!important}'
         ].join('\n')).appendTo('head');
+        $('<style id="lamplay-025-style"></style>').text('.player-panel .player-next.lp-next-action{max-width:25vw;box-sizing:border-box}.player-next.lp-next-action .player-next__episode{min-width:0;max-width:100%}.player-next.lp-next-action .player-next__body{min-width:0;overflow:hidden}.player-next.lp-next-action .player-next__episode-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lamplay .lp-strip{scroll-behavior:auto}').appendTo('head');
         var nativeSelectShow=Lampa.Select.show;
         Lampa.Select.show=function(options){
             if(options && options.items){options.items=options.items.map(function(item){if(item.title!==NAME)return item;var copy=Object.assign({},item,{subtitle:SUMMARY});if(typeof copy.icon==='string' && copy.icon.indexOf('lamplay-logo')>=0)copy.icon=copy.icon.replace('viewBox="5 5 54 54"','viewBox="13 12 39 41"');return copy;});}
@@ -3297,7 +3318,7 @@
         });
         Lampa.SettingsApi.addParam({component:filmixMenu,param:{name:KEY+'_filmix_status',type:'button'},field:{name:'Статус Filmix'},onRender:function(item){filmixStatusItem=item;if(!item.find('.settings-param__value').length)item.append('<div class="settings-param__value"></div>');item.find('.settings-param__value').text(setting('filmix_status','Не авторизован'));}});
         param('filmix_route','select','Подключение Filmix','auto',{auto:'Автоматически',tv:'FilmixTV (HTTPS)',mobile:'Мобильный API'},'Автоматически: сначала мобильный API, затем FilmixTV. Привязка и качество аккаунта относятся к мобильному API.',filmixMenu);
-        param('filmix_hls','select','Обработка HLS Filmix','auto',{auto:'Автоматически',hlsjs:'Программная (HLS.js)',native:'Системная'},'На LG при поддержке MediaSource автоматически используется HLS.js. Если поток не запускается, попробуйте системную обработку.',filmixMenu);
+        param('filmix_hls','select','Обработка HLS Filmix','auto',{auto:'Автоматически',hlsjs:'Программная (HLS.js)',native:'Системная'},'На LG автоматически используется системный HLS; при необходимости можно выбрать HLS.js вручную.',filmixMenu);
         param('filmix_host','input','Filmix - адрес API','http://filmixapp.cyou','','Адрес сервиса API. Для HTTP-адреса сама Lampa также должна быть открыта по HTTP.',filmixMenu);
         buttonParam(filmixMenu,'filmix_api_mirrors','Выбрать адрес API Filmix',function(){var hosts=['http://filmixapp.cyou','http://filmixapp.vip','http://fxapp.biz'];Lampa.Select.show({title:'Адрес API Filmix',items:hosts.map(function(host){return{title:host,value:host,selected:host===setting('filmix_host','http://filmixapp.cyou')};}),onSelect:function(item){save('filmix_host',item.value);sourceHealth={};Lampa.Noty.show('Адрес Filmix сохранён. Повторно откройте источник.');Lampa.Controller.toggle('settings_component');},onBack:function(){Lampa.Controller.toggle('settings_component');}});},'Альтернативные адреса мобильного API. Смена адреса не снимает ограничения браузера.');
         Lampa.SettingsApi.addParam({component:filmixMenu,param:{name:KEY+'_filmix_token',type:'input',default:'',values:''},field:{name:'Токен устройства Filmix',description:'Сохраняется автоматически после привязки устройства.'},onRender:function(item){filmixTokenItem=item;},onChange:function(){filmixStatus(null);}});
@@ -3310,24 +3331,28 @@
         param('timeout', 'select', 'Ожидание ответа', '15', { '10': '10 сек.', '15': '15 сек.', '30': '30 сек.' }, '', extraMenu);
         var statusPainted=[];
         function paintStatuses(){
-            statusPainted.forEach(function(entry){entry.node.style.backgroundColor=entry.color;});statusPainted=[];
-            if(!flag(setting('colored_statuses',false)))return;
+            statusPainted.forEach(function(entry){entry.node.setAttribute('style',entry.style);});statusPainted=[];
+            var mode=setting('status_mode',null);if(mode===null){mode=flag(setting('colored_statuses',false))?'fill':'off';save('status_mode',mode);}if(mode==='off')return;
             var palette={returning_series:'#4CAF50',planned:'#A970FF',in_production:'#29B6F6',ended:'#FFD54F',canceled:'#F44336',pilot:'#29B6F6',released:'#FFD54F',rumored:'#B0BEC5',post_production:'#A970FF'};
-            function paint(node,color){statusPainted.push({node:node,color:node.style.backgroundColor});node.style.backgroundColor=color;}
+            function paint(node,color){statusPainted.push({node:node,style:node.getAttribute('style')||''});$(node).css({display:'inline-flex',alignItems:'center',justifyContent:'center',verticalAlign:'middle',boxSizing:'border-box',lineHeight:'1.2',padding:'.2em .35em',borderColor:mode==='outline'?color:'',color:mode==='outline'?color:'#fff',backgroundColor:mode==='outline'?'transparent':color});}
             $('.full-start__status').each(function(){var text=$(this).text().trim(),node=this;Object.keys(palette).some(function(key){if(text===Lampa.Lang.translate('tv_status_'+key)){paint(node,palette[key]);return true;}return false;});});
             $('.full-start__pg').each(function(){if(/^(?:18\+|NC-17)$/i.test($(this).text().trim()))paint(this,'#F44336');});
         }
         Lampa.Listener.follow('activity,full',function(e){if(e.type==='complite' || e.type==='archive')paintStatuses();});
         document.addEventListener('keydown',function(e){
-            var next=e.key==='MediaTrackNext' || e.keyCode===176,prev=e.key==='MediaTrackPrevious' || e.keyCode===177;
+            var directions={37:'left',38:'up',39:'right',40:'down'},dir=directions[e.keyCode] || ({ArrowLeft:'left',ArrowUp:'up',ArrowRight:'right',ArrowDown:'down'})[e.key];
+            if(dir && activeScreen && activeScreen.remoteDirection && activeScreen.remoteDirection(dir)){e.preventDefault();e.stopImmediatePropagation();return;}
+            var next=e.key==='MediaTrackNext' || e.keyCode===176 || e.key==='ChannelUp' || e.keyCode===427 || e.keyCode===33,prev=e.key==='MediaTrackPrevious' || e.keyCode===177 || e.key==='ChannelDown' || e.keyCode===428 || e.keyCode===34;
             if(!next && !prev || !Lampa.Player || !Lampa.Player.playdata || !Lampa.PlayerPlaylist)return;
             var data=Lampa.Player.playdata();if(!data || !data._lamplay || data.episode===undefined)return;
+            var state=Lampa.Controller.enabled && Lampa.Controller.enabled();if(state && !/^player/.test(state.name))return;
             e.preventDefault();e.stopImmediatePropagation();if(e.repeat)return;
+            var video=Lampa.PlayerVideo && Lampa.PlayerVideo.video && Lampa.PlayerVideo.video();if(video && video.duration>0 && data.timeline && data.timeline.handler)data.timeline.handler(video.currentTime/video.duration*100,video.currentTime,video.duration);
             if(next && Lampa.PlayerPlaylist.canNext())Lampa.PlayerPlaylist.next();else if(prev && Lampa.PlayerPlaylist.position()>0)Lampa.PlayerPlaylist.prev();else if(data._lpAdjacent)data._lpAdjacent(next?1:-1);
         },true);
         var ratingsModule=createIntegratedRatings();
         param('ratings_enabled','trigger','Включить функцию рейтингов',false,undefined,'Приоритет и окраска рейтингов по всей Lampa.',ratingsMenu,function () {ratingsModule.setEnabled(setting('ratings_enabled',false));});
-        param('colored_statuses','trigger','Включить цветные статусы',false,undefined,'Окрашивать статусы выпуска и возрастные отметки 18+ / NC-17.',ratingsMenu,paintStatuses);
+        param('status_mode','select','Режим цветных статусов',flag(setting('colored_statuses',false))?'fill':'off',{off:'Выключено',outline:'Контур',fill:'Заливка'},'Оформление цветных статусов в карточке произведения.',ratingsMenu,paintStatuses);
         function ratingsParam(name,type,title,value,values) {param('ratings_'+name,type,title,value,values,'',ratingsMenu,function () {ratingsModule.refresh();});}
         ratingsParam('priority','select','Приоритет рейтинга','imdb',{imdb:'IMDb',kp:'Кинопоиск',tmdb:'TMDB'});
         ratingsParam('list_color','trigger','Цветной рейтинг в списках',true);

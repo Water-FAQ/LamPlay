@@ -1,0 +1,249 @@
+{
+  "checkedAt": "2026-11-10T11:31:50.571Z",
+  "checks": [
+    {
+      "name": "health",
+      "status": 200,
+      "bytes": 186,
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "name": "animego-worker",
+      "status": 502,
+      "bytes": 61,
+      "contentType": "application/json; charset=utf-8",
+      "error": "upstream_http_error"
+    },
+    {
+      "name": "kino-worker",
+      "status": 200,
+      "bytes": 124,
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "name": "filmix-worker",
+      "status": 200,
+      "bytes": 10545,
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "name": "cvh-worker",
+      "status": 200,
+      "bytes": 539,
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "name": "rezka-worker",
+      "status": 502,
+      "bytes": 61,
+      "contentType": "application/json; charset=utf-8",
+      "error": "upstream_http_error"
+    },
+    {
+      "name": "animelib-worker",
+      "status": 200,
+      "bytes": 11125,
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "name": "cvh-worker-video",
+      "status": 502,
+      "bytes": 61,
+      "contentType": "application/json; charset=utf-8",
+      "error": "upstream_http_error"
+    },
+    {
+      "name": "animelib-episodes",
+      "status": 200,
+      "bytes": 3296,
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "name": "animelib-player",
+      "status": 200,
+      "bytes": 4779,
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "name": "filmix-tv-direct",
+      "status": 200,
+      "bytes": 4677,
+      "contentType": "application/json;charset=utf-8"
+    },
+    {
+      "name": "filmix-worker-links",
+      "status": 403,
+      "bytes": 62,
+      "contentType": "application/json; charset=utf-8",
+      "error": "source_video_blocked"
+    },
+    {
+      "name": "filmix-direct-links",
+      "status": 200,
+      "bytes": 109384,
+      "contentType": "application/json;charset=utf-8"
+    },
+    {
+      "name": "filmix-media",
+      "status": 403,
+      "bytes": 146,
+      "contentType": "text/html"
+    },
+    {
+      "name": "filmix-media",
+      "status": 206,
+      "bytes": 2048,
+      "contentType": "application/vnd.apple.mpegurl"
+    },
+    {
+      "name": "filmix-mobile-filmixapp.cyou-https:",
+      "status": 503,
+      "bytes": 98,
+      "contentType": "text/plain"
+    },
+    {
+      "name": "filmix-mobile-filmixapp.cyou-http:",
+      "error": "network"
+    },
+    {
+      "name": "filmix-mobile-filmixapp.vip-https:",
+      "status": 503,
+      "bytes": 98,
+      "contentType": "text/plain"
+    },
+    {
+      "name": "filmix-mobile-fxapp.biz-http:",
+      "error": "network"
+    },
+    {
+      "name": "filmix-mobile-filmixapp.vip-http:",
+      "error": "network"
+    },
+    {
+      "name": "direct-rezka.ag",
+      "status": 200,
+      "bytes": 195,
+      "contentType": "text/html"
+    },
+    {
+      "name": "direct-animego.me",
+      "status": 200,
+      "bytes": 195,
+      "contentType": "text/html"
+    },
+    {
+      "name": "direct-animego.org",
+      "status": 200,
+      "bytes": 195,
+      "contentType": "text/html"
+    }
+  ],
+  "streamChecks": {
+    "checkedAt": "2026-11-10T11:33:20.061Z",
+    "checks": [
+      {
+        "name": "Shingeki no Kyojin-available-public",
+        "files": 118,
+        "qualities": [
+          480
+        ]
+      },
+      {
+        "name": "Shingeki no Kyojin-480-manifest",
+        "status": 206,
+        "bytes": 4096,
+        "host": "nl06.cdnsqu.com",
+        "type": "application/vnd.apple.mpegurl",
+        "hls": true
+      },
+      {
+        "name": "Shingeki no Kyojin-480-child",
+        "status": 206,
+        "bytes": 4096,
+        "host": "nl06.cdnsqu.com",
+        "type": "video/MP2T",
+        "hls": false
+      },
+      {
+        "name": "Shingeki no Kyojin-480-manifest",
+        "status": 206,
+        "bytes": 4096,
+        "host": "nl06.cdnsqu.com",
+        "type": "application/vnd.apple.mpegurl",
+        "hls": true
+      },
+      {
+        "name": "Shingeki no Kyojin-480-child",
+        "status": 206,
+        "bytes": 4096,
+        "host": "nl06.cdnsqu.com",
+        "type": "video/MP2T",
+        "hls": false
+      },
+      {
+        "name": "MobLand-available-public",
+        "files": 179,
+        "qualities": [
+          480
+        ]
+      },
+      {
+        "name": "MobLand-480-manifest",
+        "status": 206,
+        "bytes": 4096,
+        "host": "nl105.cdnsqu.com",
+        "type": "application/vnd.apple.mpegurl",
+        "hls": true
+      },
+      {
+        "name": "MobLand-480-child",
+        "status": 206,
+        "bytes": 4096,
+        "host": "nl105.cdnsqu.com",
+        "type": "video/MP2T",
+        "hls": false
+      },
+      {
+        "name": "MobLand-480-manifest",
+        "status": 206,
+        "bytes": 4096,
+        "host": "nl105.cdnsqu.com",
+        "type": "application/vnd.apple.mpegurl",
+        "hls": true
+      },
+      {
+        "name": "MobLand-480-child",
+        "status": 206,
+        "bytes": 4096,
+        "host": "nl105.cdnsqu.com",
+        "type": "video/MP2T",
+        "hls": false
+      },
+      {
+        "name": "kodik-worker-resolve",
+        "status": 405,
+        "bytes": 39,
+        "host": "lamplay-metadata.waterfaq.workers.dev",
+        "type": "application/json; charset=utf-8",
+        "hls": false
+      },
+      {
+        "name": "kodik-resolve-post",
+        "status": 200,
+        "qualities": [
+          "360p",
+          "480p",
+          "720p"
+        ]
+      },
+      {
+        "name": "kodik-media",
+        "status": 200,
+        "bytes": 11068,
+        "host": "p14.solodcdn.com",
+        "type": "text/plain; charset=utf-8",
+        "hls": true
+      }
+    ]
+  }
+}

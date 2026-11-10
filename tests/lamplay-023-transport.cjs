@@ -9,5 +9,6 @@ const request=(mode,url='https://plapi.cdnvideohub.com/api/v1/player/sv/playlist
  failDirect=true;await request('auto');assert.equal(direct,3);assert.equal(calls.length,1);assert.ok(calls[0].url.includes('/v1/cdnvideohub/playlist?'));
  await request('yes');assert.equal(direct,3);assert.equal(calls.length,2);
  await request('yes','https://kodik-api.com/search?title=Example&token=private-test-token');assert.equal(calls.at(-1).method,'POST');assert.ok(!calls.at(-1).url.includes('private-test-token'));assert.equal(JSON.parse(calls.at(-1).body).token,'private-test-token');
+ for(const host of ['filmixapp.cyou','filmixapp.vip','fxapp.biz']){await request('yes','http://'+host+'/api/v2/search?story=Example&user_dev_id=0000000000000000&user_dev_token=private-test-token');assert.ok(calls.at(-1).url.endsWith('/v1/filmix/mobile/search'));assert.equal(calls.at(-1).method,'POST');assert.ok(!calls.at(-1).url.includes('private-test-token'));}
  console.log('PASS direct/forced/automatic metadata routing, empty success and private POST token');
 })().catch(e=>{console.error(e);process.exitCode=1;});
