@@ -379,7 +379,7 @@
             request.timeout(timeout);
             var params = { dataType: type || 'json' };
             if (extra) Object.keys(extra).forEach(function (key) {
-                if (key !== 'onHeaders' && key !== 'browserRequest' && key !== 'nativeOnlyHeaders') params[key] = extra[key];
+                if (key !== 'onHeaders' && key !== 'browserRequest' && key !== 'nativeOnlyHeaders' && key !== 'directOnly' && key !== 'workerOnly' && key !== 'workerRoute') params[key] = extra[key];
             });
             if(extra && extra.nativeOnlyHeaders && !(Lampa.Platform && Lampa.Platform.is('android')))delete params.headers;
             request[extra && extra.browserRequest ? 'silent' : 'native'](url, function (value) {
@@ -927,14 +927,20 @@
         var dev=settings('filmix_device_id','') || Array(17).join('0').replace(/0/g,function(){return Math.floor(Math.random()*16).toString(16);}),maxHeight=480;
         function token(){return String(settings('filmix_token','') || 'aaaabbbbccccddddeeeeffffaaaabbbb').trim();}
         function preferTV(){return settings('filmix_route','auto')==='tv';}
+        function tvRequest(url,done,fail){
+            io.request(url,null,'json',done,function(error){
+                if(settings('proxy_filmix','no')==='yes' && !(error && error.httpStatus===401))return io.request(url,null,'json',done,fail,{directOnly:true});
+                fail(error);
+            });
+        }
         function tvSearch(query,movie,done,fail){
-            io.request('https://api.filmix.tv/api-fx/list?search='+encodeURIComponent(query)+'&limit=48',null,'json',function(data){
+            tvRequest('https://api.filmix.tv/api-fx/list?search='+encodeURIComponent(query)+'&limit=48',function(data){
                 if(!data || data.status!=='ok' || !Array.isArray(data.items))return fail(new Error('FilmixTV: поиск вернул некорректный ответ.'));
                 done(rank(data.items.map(function(r){return{id:r.id,title:r.title,original:r.original_name || r.original_title,year:r.year};}),movie));
             },fail);
         }
         function tvOpen(result,done,fail){
-            io.request('https://api.filmix.tv/api-fx/post/'+encodeURIComponent(result.id)+'/video-links',null,'json',function(data){
+            tvRequest('https://api.filmix.tv/api-fx/post/'+encodeURIComponent(result.id)+'/video-links',function(data){
                 var rows=[],voices=[],seen={};
                 function add(title,season,number,episode){if(!episode || !Array.isArray(episode.files) || !episode.files.some(function(f){return absolute(f.url) && +f.quality>0 && +f.quality<=maxHeight;}))return;title=String(title || 'Озвучка источника');if(!seen[title]){seen[title]=true;voices.push({id:title,title:title});}rows.push({season:String(season),number:String(number),title:episode.title || 'Серия '+number,voice:{id:title,title:title},data:{tvFiles:episode.files}});}
                 if(Array.isArray(data))data.forEach(function(ep){add(ep.voiceover,0,1,ep);});
