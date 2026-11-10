@@ -1,0 +1,107 @@
+{
+  "source-checks": [
+    {
+      "name": "filmix-worker-search",
+      "status": 200,
+      "bytes": 10545
+    },
+    {
+      "name": "filmix-worker-video",
+      "status": 403,
+      "bytes": 62,
+      "error": "source_video_blocked"
+    },
+    {
+      "name": "cvh-worker-catalog",
+      "status": 200,
+      "bytes": 539
+    },
+    {
+      "name": "cvh-worker-video",
+      "status": 502,
+      "bytes": 61,
+      "error": "upstream_http_error"
+    },
+    {
+      "name": "animelib-search",
+      "status": 200,
+      "bytes": 34249
+    },
+    {
+      "name": "animelib-episodes",
+      "status": 200,
+      "bytes": 62354
+    },
+    {
+      "name": "animelib-player",
+      "status": 200,
+      "bytes": 4246
+    },
+    {
+      "name": "animego-search",
+      "status": 502,
+      "bytes": 61,
+      "error": "upstream_http_error"
+    },
+    {
+      "name": "rezka-mirror",
+      "status": 502,
+      "bytes": 61,
+      "error": "upstream_http_error"
+    }
+  ],
+  "filmix": [
+    {
+      "host": "http://filmixapp.cyou",
+      "error": "fetch failed"
+    },
+    {
+      "host": "https://filmixapp.cyou",
+      "status": 503,
+      "bytes": 98
+    },
+    {
+      "host": "http://filmixapp.vip",
+      "error": "fetch failed"
+    },
+    {
+      "host": "https://filmixapp.vip",
+      "status": 503,
+      "bytes": 91
+    },
+    {
+      "host": "http://fxapp.biz",
+      "error": "fetch failed"
+    },
+    {
+      "route": "direct-tv-video-links",
+      "status": 200,
+      "bytes": 917
+    }
+  ],
+  "stream": [
+    {
+      "source": "Filmix-direct",
+      "status": 403,
+      "bytes": 146,
+      "contentType": "text/html",
+      "host": "nl201.cdnsqu.com"
+    },
+    {
+      "source": "Filmix-direct",
+      "status": 403,
+      "bytes": 146,
+      "contentType": "text/html",
+      "host": "nl201.cdnsqu.com"
+    }
+  ],
+  "kodik": {
+    "source": "Kodik",
+    "results": 1,
+    "autoTokenStored": false
+  },
+  "kodik-full": {
+    "source": "Kodik",
+    "error": "Unexpected token '<', \"  <!--\n  Что\"... is not valid JSON"
+  }
+}
