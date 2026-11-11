@@ -1,11 +1,11 @@
-/* LamPlay by WaterFAQ - 0.25.0 (experimental)
+/* LamPlay by WaterFAQ - 0.26.0 (experimental)
  * Independent Lampa plugin. Optional fixed metadata proxy; no remote code execution.
  * Providers: HDrezka, Kodik, AniLiberty, Filmix, CDN VideoHub, KinoTochka, VeoVeo.
  */
 (function (root) {
     'use strict';
-    var VERSION = '0.25.0';
-    var RELEASE_DATE = '10.11.2026';
+    var VERSION = '0.26.0';
+    var RELEASE_DATE = '11.11.2026';
     var KEY = 'lamplay';
     var NAME = 'LamPlay';
     var SUMMARY = 'Фильмы, сериалы и аниме онлайн';
@@ -1309,10 +1309,11 @@
     // One animation per pane, preserving current velocity when the remote changes its target.
     function animatePane(pane,dest,horizontal) {
         pane.style.scrollBehavior='auto';var state=pane._lpMotion,now=root.performance?root.performance.now():Date.now(),from=horizontal?pane.scrollLeft:pane.scrollTop;
+        if(state && pane._lpScrollFrame && state.horizontal===horizontal && Math.abs(state.dest-dest)<.5)return;
         var velocity=state&&state.horizontal===horizontal?state.velocity:0,delta=dest-from;
         if(velocity*delta<0)velocity=0;velocity=Math.sign(delta)*Math.min(Math.abs(velocity),Math.abs(delta)*3/260);
         if(pane._lpScrollFrame)root.cancelAnimationFrame(pane._lpScrollFrame);
-        state=pane._lpMotion={velocity:velocity,horizontal:horizontal};var duration=260;
+        state=pane._lpMotion={velocity:velocity,horizontal:horizontal,dest:dest};var duration=260;
         function tick(time){var t=Math.min(1,Math.max(0,(time-now)/duration)),t2=t*t,t3=t2*t;
             var pos=from+(3*t2-2*t3)*delta+(t3-2*t2+t)*duration*velocity;
             state.velocity=((6*t-6*t2)*delta+(3*t2-4*t+1)*duration*velocity)/duration;
@@ -1332,7 +1333,6 @@
         }
         if (pane.classList.contains('lp-strip') || pane.classList.contains('lp-tools') && !pane.closest('.lamplay').classList.contains('lp-columns') || pane.classList.contains('lp-body-pane') && (target.classList.contains('lp-episode') || target.classList.contains('lp-result'))) {
             var horizontal=!pane.classList.contains('lp-body-pane') || !pane.closest('.lamplay').classList.contains('lp-columns');
-            if(pane.classList.contains('lp-strip')){var next=rect.left<box.left+gap?pane.scrollLeft+rect.left-box.left-gap:rect.right>box.right-gap?pane.scrollLeft+rect.right-box.right+gap:pane.scrollLeft;if(Math.abs(next-pane.scrollLeft)>1)animatePane(pane,Math.max(0,Math.min(next,pane.scrollWidth-pane.clientWidth)),true);return;}
             var dest=horizontal?pane.scrollLeft+rect.left-box.left+(rect.width-pane.clientWidth)/2:pane.scrollTop+rect.top-box.top+(rect.height-pane.clientHeight)/2;
             dest=Math.max(0,Math.min(dest,horizontal?pane.scrollWidth-pane.clientWidth:pane.scrollHeight-pane.clientHeight));
             animatePane(pane,dest,horizontal);
@@ -1487,6 +1487,23 @@
                 }
             });
         }
+        // Use Lampa's native error callback: one fallback at a time, same episode and quality.
+        function filmixRetry(item,originalQualities) {
+            var tried={},auto=setting('filmix_hls','auto')==='auto',webos=Lampa.Platform.is('webos');
+            item.error=function(work,retry){
+                if(currentPlayback!==work || !Lampa.Player.playdata || Lampa.Player.playdata()!==work)return;
+                var url=work.url,engine=work.hls_type || '',key=url+'|'+engine;tried[key]=true;
+                var raw=Object.keys(originalQualities).map(function(label){return originalQualities[label];}).filter(function(candidate){return /^https:/.test(candidate) && candidate.replace(/^https:/,'http:')===url;})[0];
+                var target=raw && !tried[raw+'|'+engine]?{url:raw,engine:engine}:null;
+                if(!target && auto && webos && /\.m3u8(?:[?#]|$)/i.test(url) && (root.MediaSource || root.WebKitMediaSource)){
+                    var hls=raw || url;if(!tried[hls+'|hlsjs'])target={url:hls,engine:'hlsjs'};
+                }
+                if(!target){delete work.error;return;}
+                tried[target.url+'|'+target.engine]=true;work.url=target.url;work.hls_type=target.engine || undefined;
+                if(work.timeline && work.timeline.time>0)work._lpResumeAt=work.timeline.time;
+                retry(target.url);
+            };
+        }
         function historySource(movie) {
             var entry = object(setting('source_history', {}))[movieKey(movie)];
             var preferred=setting('source','rezka');if(preferred==='animedia')preferred='rezka';
@@ -1541,9 +1558,10 @@
             function savedResume() { return object(setting('resume', {}))[key]; }
             function series() { return release && typeof release.series === 'boolean' ? release.series : type === 'tv'; }
             function view() { var v = setting(series() ? 'view_series' : 'view_movie', series() ? 'horizontal' : 'vertical'); return ['horizontal','vertical','card'].indexOf(v) < 0 || !series() && v === 'horizontal' ? 'vertical' : v; }
+            var restoringFocus=false,controlsRelease=null,controlsSignature='';
             function focusNode(node) {
                 node = $(node);if(node.hasClass('lp-result'))lastResult=node[0];if(resultsVisible && node.attr('data-lp-control'))resultFilter=node.attr('data-lp-control');last = node[0];lastControl=node.attr('data-lp-control') || '';if(lastControl) returnFilter=lastControl;if (last && last._lpEpisodeKey) lastEpisodeKey=last._lpEpisodeKey;
-                node.parents('.lp-scroll').each(function () { keepVisible(this,node[0]); });
+                node.parents('.lp-scroll').each(function () { if(!(restoringFocus && this.classList.contains('lp-strip')))keepVisible(this,node[0]); });
                 if (node[0] && node[0]._lpProbe) enqueueProbe(node[0]._lpProbe);
             }
             function interactive(node, action) {
@@ -1803,8 +1821,11 @@
                 }pump();
             }
             function refreshControls() {
-                var restoreControl=lastControl,stripOffsets=filters.find('.lp-strip').toArray().map(function(n){return n.scrollLeft;});filters.find('.lp-strip').each(function(){if(this._lpScrollFrame)root.cancelAnimationFrame(this._lpScrollFrame);});tools.empty();filters.empty();
-                if (release && series() && !busy) {
+                var restoreControl=lastControl,stripOffsets=filters.find('.lp-strip').toArray().map(function(n){return n.scrollLeft;}),signature=release && series()?seasonList().join('|')+'#'+release.voices.map(function(v){return v.id+'|'+v.title;}).join('#'):'';
+                var reuse=release && release===controlsRelease && signature===controlsSignature && !busy && filters.find('[data-count-season]').length && filters.find('[data-count-voice]').length;
+                tools.empty();if(!reuse){filters.find('.lp-strip').each(function(){if(this._lpScrollFrame)root.cancelAnimationFrame(this._lpScrollFrame);});filters.empty();}
+                if(reuse){filters.find('[data-count-season]').each(function(){$(this).toggleClass('lp-selected',$(this).attr('data-count-season')===String(season));});filters.find('[data-count-voice]').each(function(){$(this).toggleClass('lp-selected',voice && $(this).attr('data-count-voice')===String(voice.id));});}
+                else if (release && series() && !busy) {
                     var seasons = seasonList();
                     var seasonStrip = $('<div class="lp-strip-group"><div class="lp-caption">Сезоны</div><div class="lp-scroll lp-strip"></div></div>');
                     seasons.forEach(function (s) {decorateCount(control(seasonLabel(s),function () {chooseSeason(s);},seasonStrip.find('.lp-strip'),String(s)===String(season)),null).attr('data-count-season',s);});
@@ -1824,7 +1845,7 @@
                 control('Сбросить фильтр',function () {query=initialQuery;pendingResume=null;if(source.clearCache)source.clearCache();search();});
                 control(query,searchMenu).empty().text(query).wrapInner('<span class="lp-control-value"></span>').attr({'aria-label':'Поиск: '+query,'data-lp-control':'search'}).addClass('lp-search').prepend('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/></svg>');
                 if (!resultsVisible){var resultButton=control('К результатам',function(){if(results)backToResults();});if(!results)resultButton.removeClass('selector').attr({'aria-disabled':'true',tabindex:'-1'});}
-                layout();if(!busy)updateCounts();filters.find('.lp-strip').each(function(i){this.scrollLeft=stripOffsets[i]||0;});if(restoreControl) {var restored=controlTarget(restoreControl);if(restored.length) last=restored[0];}
+                controlsRelease=release;controlsSignature=signature;layout();if(!busy)updateCounts();if(!reuse)filters.find('.lp-strip').each(function(i){this.scrollLeft=stripOffsets[i]||0;});if(restoreControl) {var restored=controlTarget(restoreControl);if(restored.length) last=restored[0];}
             }
             function search() {
                 release=null;resultSelected=null;voice=null;episodes=[];catalogSeasons=[];results=null;body.empty();
@@ -2208,7 +2229,7 @@
             function resolveCell(item,done,fail,mark) {
                 var ep=item._lpEpisode, hit=cache[streamKey(ep)];
                 function ready(streams) {
-                    try {streams=prepareStreams(streams,setting);item.url=chooseQuality(streams.quality,setting('quality','1080'));item.quality=streams.quality;item.subtitles=streams.subtitles && streams.subtitles.length?streams.subtitles:false;if (!item.url) throw new Error('Нет доступного видеопотока.');if(mark!==false)markStarted(ep);var previous=Lampa.Storage.field?Lampa.Storage.field('video_quality_default'):Lampa.Storage.get('video_quality_default',1080),chosen=Object.keys(item.quality).filter(function(k){return item.quality[k]===item.url;})[0];
+                    try {var originalQualities=streams.quality;streams=prepareStreams(streams,setting);item.url=chooseQuality(streams.quality,setting('quality','1080'));item.quality=streams.quality;item.subtitles=streams.subtitles && streams.subtitles.length?streams.subtitles:false;if (!item.url) throw new Error('Нет доступного видеопотока.');if(source.id==='filmix')filmixRetry(item,originalQualities);if(mark!==false)markStarted(ep);var previous=Lampa.Storage.field?Lampa.Storage.field('video_quality_default'):Lampa.Storage.get('video_quality_default',1080),chosen=Object.keys(item.quality).filter(function(k){return item.quality[k]===item.url;})[0];
                     try{Lampa.Storage.set('video_quality_default',qualityNumber(chosen));done();}finally{Lampa.Storage.set('video_quality_default',previous);}}
                     catch(e) {fail(e);}
                 }
@@ -2304,7 +2325,7 @@
                 Lampa.Controller.add('content',{toggle:function () {
                     Lampa.Controller.collectionSet(html,false,true);
                     var target=last && html[0].contains(last) && $(last).hasClass('selector')?last:body.find('.selector')[0] || tools.find('.selector')[0];
-                    Lampa.Controller.collectionFocus(target || false,html);if (target) focusNode(target);
+                    restoringFocus=true;try{Lampa.Controller.collectionFocus(target || false,html);if (target) focusNode(target);}finally{restoringFocus=false;}
                 },up:function () {move('up','head');},down:function () {move('down');},left:function () {move('left','menu');},right:function () {move('right');},back:self.back});
                 Lampa.Controller.toggle('content');
             };
@@ -2578,7 +2599,8 @@
             '.lamplay.lp-series[data-view=horizontal] .lp-episode-info,.lamplay.lp-series[data-view=card] .lp-episode-info{height:auto!important;min-height:7.2em!important;overflow:visible!important}',
             '.lamplay.lp-series[data-view=horizontal] .lp-description,.lamplay.lp-series[data-view=card] .lp-description{display:-webkit-box!important;-webkit-box-orient:vertical;-webkit-line-clamp:3!important;height:auto!important;max-height:3.9em;overflow:hidden!important}'
         ].join('\n')).appendTo('head');
-        $('<style id="lamplay-025-style"></style>').text('.player-panel .player-next.lp-next-action{max-width:25vw;box-sizing:border-box}.player-next.lp-next-action .player-next__episode{min-width:0;max-width:100%}.player-next.lp-next-action .player-next__body{min-width:0;overflow:hidden}.player-next.lp-next-action .player-next__episode-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lamplay .lp-strip{scroll-behavior:auto}').appendTo('head');
+        $('<style id="lamplay-025-style"></style>').text('.player-panel .player-next.lp-next-action{max-width:33.333333vw;box-sizing:border-box}.player-next.lp-next-action .player-next__episode{min-width:0;max-width:100%}.player-next.lp-next-action .player-next__body{min-width:0;overflow:hidden}.player-next.lp-next-action .player-next__episode-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lamplay .lp-strip{scroll-behavior:auto}').appendTo('head');
+        $('<style id="lamplay-stable-details"></style>').text('.full-start-new__body.lp-stable-details>.full-start-new__right{min-width:0;flex-basis:0}.full-start-new__body.lp-stable-details>.full-start-new__right>.original_title{box-sizing:border-box;width:100%;max-width:100%;text-align:right;overflow-wrap:anywhere}').appendTo('head');
         var nativeSelectShow=Lampa.Select.show;
         Lampa.Select.show=function(options){
             if(options && options.items){options.items=options.items.map(function(item){if(item.title!==NAME)return item;var copy=Object.assign({},item,{subtitle:SUMMARY});if(typeof copy.icon==='string' && copy.icon.indexOf('lamplay-logo')>=0)copy.icon=copy.icon.replace('viewBox="5 5 54 54"','viewBox="13 12 39 41"');return copy;});}
@@ -2660,7 +2682,7 @@
             if (event.type!=='complite' && event.type!=='complete') return;
             var render=event.body || event.object && event.object.activity && event.object.activity.render();
             if (!render) return;
-            $(render).find('.full-start-new__body').addClass('lp-poster-stable');var title=$(render).find('.full-start-new__title, .full-start__title').first(),movie=event.data && event.data.movie;
+            $(render).find('.full-start-new__body').addClass('lp-poster-stable lp-stable-details');var title=$(render).find('.full-start-new__title, .full-start__title').first(),movie=event.data && event.data.movie;
             if (!title.length || !movie) return;
             var binding={title:title,movie:movie,name:movie.title || movie.name || title.text()};title[0]._lamplayLogoBinding=binding;
             cardLogoBindings=cardLogoBindings.filter(function (b) {return b.title[0]!==title[0] && root.document.documentElement.contains(b.title[0]);});
