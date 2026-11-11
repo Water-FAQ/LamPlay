@@ -1619,14 +1619,17 @@
             function finish() { busy=false;html.removeClass('lp-loading lp-switching').attr('aria-busy','false');setStatus(''); }
             function failed(e) { if (destroyed) return;busy=false;html.removeClass('lp-loading lp-switching').attr('aria-busy','false');setStatus(safeError(e),true);refreshControls();var retry=status.find('.lp-retry');if(retry.length)last=retry[0];self.start(); }
             function cancel() { changeGeneration();busy=false;html.removeClass('lp-loading lp-switching').attr('aria-busy','false');setStatus('Загрузка отменена. Измените поиск или источник.');refreshControls();self.start(); }
+            var layoutKind='';
             function layout() {
-                var v = resultsVisible ? 'results' : view();
+                var v = resultsVisible ? 'results' : view(),kind=v+'|'+series();
                 html.toggleClass('lp-columns',v==='vertical' || v==='results' || !series() && v==='card');html.attr('data-view',v).toggleClass('lp-series',!resultsVisible && series()).toggleClass('lp-film',!resultsVisible && !series());
-                if (!resultsVisible && series() && (v === 'card' || v === 'horizontal')) {
-                    side.detach();main.detach();filters.append(tools);top.append(hero,filters);panel.append(top,loader,bodyPane);
-                } else {
-                    top.detach();side.append(hero,tools);main.append(filters,loader,bodyPane);panel.append(side,main);
-                }
+                if(kind!==layoutKind){
+                    if (!resultsVisible && series() && (v === 'card' || v === 'horizontal')) {
+                        side.detach();main.detach();filters.append(tools);top.append(hero,filters);panel.append(top,loader,bodyPane);
+                    } else {
+                        top.detach();side.append(hero,tools);main.append(filters,loader,bodyPane);panel.append(side,main);
+                    }layoutKind=kind;
+                }else if(!resultsVisible && series() && (v==='card' || v==='horizontal') && tools.parent()[0]!==filters[0])filters.append(tools);
                 syncBackground(v);
                 fitStrip();
             }
@@ -1693,10 +1696,11 @@
                 var sideways=series() && (v==='horizontal' || v==='card');
                 bodyPane.css({'margin-left':'',width:'','padding-left':'','padding-right':''});
                 html.find('.lp-strip,.lp-tools').each(function(){
-                    var row=$(this),across=row.hasClass('lp-strip') || !listLayout();
+                    var row=$(this),across=row.hasClass('lp-strip') || !listLayout(),savedLeft=this.scrollLeft;
                     row.css({width:'','max-width':''});
                     if(across){var box=this.getBoundingClientRect();row.css({width:Math.max(0,(listLayout()?bodyPane[0].getBoundingClientRect().right-parseFloat(root.getComputedStyle(bodyPane[0]).paddingRight):bounds.right-parseFloat(root.getComputedStyle(panel[0]).paddingRight))-box.left)+'px','max-width':'none'});edgeFade(this,true);row.off('scroll.lpEdges').on('scroll.lpEdges',function(){edgeFade(this,true);});}
                     else row.css({'mask-image':'none','-webkit-mask-image':'none'}).off('scroll.lpEdges');
+                    if(across)this.scrollLeft=savedLeft;
                 });
                 if(series() && v==='vertical'){var gutter=bodyPane[0].clientWidth*.018+parseFloat(root.getComputedStyle(html[0]).fontSize)*.35;bodyPane.css({'margin-left':-gutter+'px',width:'calc(100% + '+(gutter*2)+'px)','padding-left':gutter+'px','padding-right':gutter+'px'});}
                 if(sideways){
