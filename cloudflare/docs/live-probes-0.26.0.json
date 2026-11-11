@@ -1,0 +1,244 @@
+{
+  "checkedAt": "2026-11-11T01:25:14.105Z",
+  "tests": [
+    {
+      "id": 90794,
+      "voice": "StudioBand",
+      "scheme": "https:",
+      "status": 200,
+      "type": "application/vnd.apple.mpegurl",
+      "cors": "*",
+      "bytes": 32292,
+      "hls": true,
+      "tags": [
+        "#EXTM3U",
+        "#EXT-X-TARGETDURATION",
+        "#EXT-X-ALLOW-CACHE",
+        "#EXT-X-PLAYLIST-TYPE",
+        "#EXT-X-VERSION",
+        "#EXT-X-MEDIA-SEQUENCE",
+        "#EXTINF",
+        "#EXT-X-ENDLIST"
+      ],
+      "segment": {
+        "status": 206,
+        "type": "video/MP2T",
+        "bytes": 131072,
+        "cors": "*"
+      }
+    },
+    {
+      "id": 90794,
+      "voice": "StudioBand",
+      "scheme": "http:",
+      "error": "TypeError:fetch failed"
+    },
+    {
+      "id": 90794,
+      "voice": "Дубляж [1080+, Ukr, Amanogawa]",
+      "scheme": "https:",
+      "status": 200,
+      "type": "application/vnd.apple.mpegurl",
+      "cors": "*",
+      "bytes": 33986,
+      "hls": true,
+      "tags": [
+        "#EXTM3U",
+        "#EXT-X-TARGETDURATION",
+        "#EXT-X-ALLOW-CACHE",
+        "#EXT-X-PLAYLIST-TYPE",
+        "#EXT-X-VERSION",
+        "#EXT-X-MEDIA-SEQUENCE",
+        "#EXTINF",
+        "#EXT-X-ENDLIST"
+      ],
+      "segment": {
+        "status": 206,
+        "type": "video/MP2T",
+        "bytes": 131072,
+        "cors": "*"
+      }
+    },
+    {
+      "id": 90794,
+      "voice": "Дубляж [1080+, Ukr, Amanogawa]",
+      "scheme": "http:",
+      "error": "TypeError:fetch failed"
+    },
+    {
+      "id": 176734,
+      "voice": "Дубляж [RHS, 4K]",
+      "scheme": "https:",
+      "status": 200,
+      "type": "application/vnd.apple.mpegurl",
+      "cors": "*",
+      "bytes": 69989,
+      "hls": true,
+      "tags": [
+        "#EXTM3U",
+        "#EXT-X-TARGETDURATION",
+        "#EXT-X-ALLOW-CACHE",
+        "#EXT-X-PLAYLIST-TYPE",
+        "#EXT-X-VERSION",
+        "#EXT-X-MEDIA-SEQUENCE",
+        "#EXTINF",
+        "#EXT-X-ENDLIST"
+      ],
+      "segment": {
+        "status": 206,
+        "type": "video/MP2T",
+        "bytes": 131072,
+        "cors": "*"
+      }
+    },
+    {
+      "id": 176734,
+      "voice": "Дубляж [RHS, 4K]",
+      "scheme": "http:",
+      "error": "TypeError:fetch failed"
+    },
+    {
+      "id": 176734,
+      "voice": "Amedia, Syncmer",
+      "scheme": "https:",
+      "error": "TimeoutError:The operation was aborted due to timeout"
+    },
+    {
+      "id": 176734,
+      "voice": "Amedia, Syncmer",
+      "scheme": "http:",
+      "error": "TypeError:fetch failed"
+    }
+  ],
+  "mp4": [
+    {
+      "id": 90794,
+      "voice": "StudioBand",
+      "status": 403,
+      "type": "text/html",
+      "bytes": 146,
+      "mp4": false
+    },
+    {
+      "id": 90794,
+      "voice": "Дубляж [1080+, Ukr, Amanogawa]",
+      "status": 403,
+      "type": "text/html",
+      "bytes": 146,
+      "mp4": false
+    },
+    {
+      "id": 176734,
+      "voice": "Дубляж [RHS, 4K]",
+      "status": 403,
+      "type": "text/html",
+      "bytes": 146,
+      "mp4": false
+    },
+    {
+      "id": 176734,
+      "voice": "Amedia, Syncmer",
+      "status": 206,
+      "type": "video/mp4",
+      "bytes": 8192,
+      "mp4": true
+    }
+  ],
+  "sources": [
+    {
+      "name": "health",
+      "status": 200,
+      "bytes": 186
+    },
+    {
+      "name": "animego-worker",
+      "status": 502,
+      "bytes": 61,
+      "error": "upstream_http_error"
+    },
+    {
+      "name": "filmix-worker-links",
+      "status": 403,
+      "bytes": 62,
+      "error": "source_video_blocked"
+    },
+    {
+      "name": "rezka-standby-rezka.tv",
+      "status": 502,
+      "bytes": 61,
+      "error": "upstream_http_error"
+    },
+    {
+      "name": "rezka-kvk.zone",
+      "status": 502,
+      "bytes": 61,
+      "error": "upstream_http_error"
+    },
+    {
+      "name": "rezka-rezka.ag",
+      "status": 502,
+      "bytes": 61,
+      "error": "upstream_http_error"
+    },
+    {
+      "name": "cvh-catalog",
+      "status": 200,
+      "bytes": 539
+    },
+    {
+      "name": "cvh-video",
+      "status": 502,
+      "bytes": 61,
+      "error": "upstream_http_error"
+    },
+    {
+      "name": "animelib-search",
+      "status": 200,
+      "bytes": 11125
+    },
+    {
+      "name": "animelib-episodes",
+      "status": 200,
+      "bytes": 3296
+    },
+    {
+      "name": "animelib-pagination",
+      "metaKeys": [],
+      "linksKeys": [],
+      "count": 13
+    },
+    {
+      "name": "animelib-player",
+      "status": 200,
+      "bytes": 4779
+    },
+    {
+      "name": "kodik-resolve",
+      "status": 200,
+      "bytes": 757
+    },
+    {
+      "name": "kodik-resolve-qualities",
+      "qualities": [
+        "360p",
+        "480p",
+        "720p"
+      ]
+    },
+    {
+      "name": "kino-find",
+      "status": 200,
+      "bytes": 124
+    },
+    {
+      "name": "animego-direct-animego.me",
+      "status": 200,
+      "bytes": 195
+    },
+    {
+      "name": "animego-direct-animego.org",
+      "status": 200,
+      "bytes": 195
+    }
+  ]
+}
